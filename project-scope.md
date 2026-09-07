@@ -19,3 +19,20 @@ Build a ticket management system that uses AI to automatically classify, respond
 - AI-suggested replies
 - User management (admin only)
 - Dashboard to view and manage all tickets
+
+## Ticket Statuses
+
+- Open
+- Resolved
+- Closed
+
+## Ticket Categories
+
+- General Question
+- Technical Question
+- Refund Request
+
+## User Roles
+
+- **Admin**: Deployed with the system. Can create and manage agents.
+- **Agent**: Created by admin. Can view and manage tickets.
