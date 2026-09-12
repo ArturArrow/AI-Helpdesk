@@ -1,0 +1,23 @@
+.app {
+  max-width: 40rem;
+  margin: 4rem auto;
+  padding: 0 1rem;
+  font-family: system-ui, sans-serif;
+  text-align: center;
+}
+
+.status {
+  font-weight: 600;
+}
+
+.status-ok {
+  color: #16a34a;
+}
+
+.status-error {
+  color: #dc2626;
+}
+
+.status-loading {
+  color: #6b7280;
+}
