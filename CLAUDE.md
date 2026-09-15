@@ -10,6 +10,13 @@ Early-stage scaffold. `server/src/index.ts` is currently just an Express app wit
 
 Use the **context7** MCP tools (`mcp__context7__resolve-library-id`, `mcp__context7__query-docs`) to fetch current documentation before writing code against a library or framework in this stack (React, Express, Prisma, Vite, Tailwind, Anthropic SDK, etc.), rather than relying on training data — resolve the library id first, then query docs for the specific API/config in question.
 
+## React version
+
+Always target the latest stable React release (currently React 19.3 with `@types/react` 19.3). When adding or upgrading client dependencies, install the latest `react`, `react-dom`, and `@types/react*` rather than pinning older majors. Write code against the current APIs, not legacy patterns:
+
+- Never use APIs or types marked `@deprecated` in the installed `@types/react` (e.g. use `SubmitEvent` / `ChangeEvent` / `InputEvent` instead of `FormEvent`). If the editor flags a deprecation, check the JSDoc in `client/node_modules/@types/react/index.d.ts` for the replacement.
+- Check context7 docs for the current React version before relying on remembered APIs.
+
 ## Commands
 
 This is a Bun workspace monorepo (`client`, `server`) using `bun.lock`.

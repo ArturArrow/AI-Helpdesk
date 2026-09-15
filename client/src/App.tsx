@@ -1,24 +1,17 @@
-import { useEffect, useState } from 'react'
-import './App.css'
+import { Navigate, Route, Routes } from 'react-router'
+import ProtectedLayout from './components/ProtectedLayout.tsx'
+import HomePage from './pages/HomePage.tsx'
+import LoginPage from './pages/LoginPage.tsx'
 
 function App() {
-  const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading')
-
-  useEffect(() => {
-    fetch('/api/health')
-      .then((res) => res.json())
-      .then((data) => setStatus(data.status === 'ok' ? 'ok' : 'error'))
-      .catch(() => setStatus('error'))
-  }, [])
-
   return (
-    <main className="app">
-      <h1>Ticket Management System</h1>
-      <p>
-        Server status:{' '}
-        <span className={`status status-${status}`}>{status}</span>
-      </p>
-    </main>
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route element={<ProtectedLayout />}>
+        <Route path="/" element={<HomePage />} />
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   )
 }
 
