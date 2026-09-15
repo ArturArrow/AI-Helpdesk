@@ -10,6 +10,17 @@ export const auth = betterAuth({
     // Accounts are seeded (admin) or created by an admin, never self-registered.
     disableSignUp: true,
   },
+  user: {
+    additionalFields: {
+      role: {
+        type: ["admin", "agent"],
+        required: false,
+        defaultValue: "agent",
+        // Server-owned: never accepted from API input.
+        input: false,
+      },
+    },
+  },
   trustedOrigins: process.env.CLIENT_URL ? [process.env.CLIENT_URL] : [],
 });
 

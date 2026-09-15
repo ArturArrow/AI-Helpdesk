@@ -13,10 +13,11 @@ const ctx = await auth.$context;
 const email = ADMIN_EMAIL.toLowerCase();
 
 if (await ctx.internalAdapter.findUserByEmail(email)) {
-  console.log(`Admin ${email} already exists, skipping`);
+  await prisma.user.update({ where: { email }, data: { role: "admin" } });
+  console.log(`Admin ${email} already exists, ensured admin role`);
 } else {
   const user = await ctx.internalAdapter.createUser(
-    { email, name: ADMIN_NAME, emailVerified: true },
+    { email, name: ADMIN_NAME, emailVerified: true, role: "admin" },
     { method: "email-password" },
   );
 
