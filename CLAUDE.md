@@ -30,6 +30,14 @@ bun run preview          # preview production build
 Server (`cd server`):
 ```bash
 bun run start           # bun run src/index.ts (no watch)
+bun run db:migrate      # prisma migrate dev (development only)
+bun run db:seed         # create/repair the admin from ADMIN_EMAIL / ADMIN_PASSWORD
+```
+
+New database (production) — needs `DATABASE_URL`, `BETTER_AUTH_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` in the environment:
+```bash
+bun run --filter server db:deploy   # prisma migrate deploy
+bun run --filter server db:seed     # idempotent; never overwrites an existing admin password
 ```
 
 There are no test scripts configured in either workspace yet.
