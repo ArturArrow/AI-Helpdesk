@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Early-stage, through the auth phase. PostgreSQL + Prisma are wired up (`server/prisma/schema.prisma`, two migrations, an idempotent admin `seed.ts`), and Better Auth provides session auth with a `role` field on users (`server/src/lib/auth.ts`, `requireAuth` middleware). The client has routing, a protected layout, and a login form built on shadcn.
+Early-stage, through the auth phase and starting on user management. PostgreSQL + Prisma are wired up (`server/prisma/schema.prisma`, two migrations, an idempotent admin `seed.ts`), and Better Auth provides session auth with a `role` field on users (`server/src/lib/auth.ts`, `requireAuth` middleware). The client has routing, a protected layout, a login form built on shadcn, and an admin-gated `/users` page that is still only a heading.
 
 Not yet built: ticket CRUD, AI integration, email in/out, and the dashboard. See `project-scope.md`, `tech-stack.md`, and `implementation-plan.md` for the intended design and build order before adding features, since the target architecture below is still ahead of the current state.
 
@@ -72,9 +72,15 @@ There are no test scripts configured in either workspace yet.
 
 Better Auth (`better-auth`) with the Prisma adapter, email + password only, DB-backed sessions. Configured in `server/src/lib/auth.ts`.
 
-**Sign-up is disabled** (`disableSignUp: true`). There is no public registration path and none should be added: the admin comes from `bun run db:seed`, and agent accounts are meant to be created by an admin. A login form that offers "create an account" would have nothing to call.
+**Sign-up is disabled** (`disableSignUp: true`). There is no public registration path and none should be added: the admin comes from `bun run db:seed`, and agent accounts are meant to be created by an admin (see *Creating accounts* below). A login form that offers "create an account" would have nothing to call.
 
-**Roles.** `Role` is a Prisma enum (`admin` | `agent`, default `agent`) and a Better Auth `additionalFields` entry declared with `input: false` — it is server-owned and never accepted from API input. Do not try to set `role` through a client-side sign-up/update payload; change it in the database or the seed. Role-based *authorization* is not built yet: `requireAuth` only proves a valid session, so an admin-only route still needs its own check.
+**Roles.** `Role` is a Prisma enum (`admin` | `agent`, default `agent`) and a Better Auth `additionalFields` entry declared `input: false` — it is server-owned and never accepted from API input. Do not try to set `role` through a client-side sign-up/update payload; change it in the database or the seed.
+
+It is also declared **`required: true` with `defaultValue: "agent"`**, which mirrors the non-nullable column and types `user.role` as `"admin" | "agent"` instead of widening it with `| null | undefined` (`InferDBFieldOutput` adds those for `required: false`). The combination looks risky next to `input: false` but is not: in `better-auth/dist/db/schema.mjs`, `parseInputData` assigns `defaultValue` and `continue`s at line ~95, so the `"role is required"` throw at line ~103 is unreachable for any field that has a default. A required field **without** a default would throw on every create.
+
+Role-based authorization exists **on the client only** (`AdminRoute`, below). There is no server-side role check yet: `requireAuth` proves a valid session and nothing more, so the client gate is cosmetic — it hides a page, it does not protect data. The first endpoint that returns or mutates admin-only data needs a `requireAdmin`-style middleware next to `requireAuth`; do not rely on `AdminRoute` to stand in for it.
+
+**Creating accounts.** There is deliberately no committed script for agent accounts — the admin UI in the current phase is meant to replace that path. To make one ad hoc, mirror `prisma/seed.ts`: `await auth.$context` → `ctx.internalAdapter.createUser({ email, name, emailVerified: true, role: "agent" }, { method: "email-password" })` → `ctx.internalAdapter.linkAccount({ userId, providerId: "credential", accountId: userId, password: await ctx.password.hash(pw) })`. Going through `internalAdapter` matters: it hashes with Better Auth's own configured hasher, so a row written directly to the table will not authenticate. Pass credentials via environment variables rather than writing them into a file. `agent@example.com` was created this way for local testing.
 
 **Server wiring** (`server/src/index.ts`):
 - `app.all("/api/auth/*splat", toNodeHandler(auth))` is mounted **before `express.json()`**. Order matters — the JSON parser would consume the request body and break every auth endpoint. Keep any new middleware that reads the body below this line. (`*splat` is Express 5 wildcard syntax.)
@@ -82,6 +88,18 @@ Better Auth (`better-auth`) with the Prisma adapter, email + password only, DB-b
 - CORS runs with `origin: process.env.CLIENT_URL, credentials: true`, and `CLIENT_URL` also feeds `trustedOrigins`. Auth is cookie-based, so a cross-origin caller must send credentials.
 
 **Client wiring.** `client/src/lib/auth-client.ts` calls `createAuthClient()` with **no `baseURL`**, so requests go to the current origin's `/api/auth` — in dev that is the Vite proxy. Keep it that way rather than hardcoding a host. `authClient.useSession()` drives `ProtectedLayout` (redirects to `/login` while unauthenticated, renders `Navbar` + `Outlet` when signed in); `authClient.signIn.email` and `authClient.signOut` handle the transitions.
+
+`role` reaches the client typed via the `inferAdditionalFields` plugin, in its generic form — `inferAdditionalFields<typeof auth>()` over a **type-only** import of the server's `auth`:
+
+```ts
+import type { auth } from '../../../server/src/lib/auth.ts'
+```
+
+This is the one place the client reaches across the workspace boundary, and it is deliberate: additional fields stay declared once, in `server/src/lib/auth.ts`, instead of being restated in a client-side schema that can drift from it. Add a field there and the client type follows with no second edit.
+
+It works because the import is types-only. `verbatimModuleSyntax` erases it, so no server code reaches the bundle (grep the built JS for `prisma` — zero hits), and `tsc` tolerates the out-of-`include` files because `tsconfig.app.json` sets no `rootDir`, runs `noEmit`, and has `skipLibCheck` for the generated Prisma declarations. The cost is real but small: ~12 server and generated-Prisma files join the client program, and a cold `tsc -b` runs ~1.8s. Keep the import `import type`, never a value import.
+
+**Client route gating.** `AdminRoute` (`client/src/components/AdminRoute.tsx`) is a layout route that renders `<Outlet />` for `role === 'admin'` and otherwise redirects to `/`. Nest it inside `ProtectedLayout` — it assumes a session already exists and does not re-check. `Navbar` takes an `isAdmin` prop from `ProtectedLayout` (which already holds the session) and hides admin links for agents, so the navbar stays presentational rather than reading the session itself. If its prop list grows much further, pass `session.user` whole instead of adding a third flag.
 
 **Environment.** `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `CLIENT_URL`; the seed additionally needs `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and optionally `ADMIN_NAME` (defaults to "Admin").
 
@@ -91,12 +109,12 @@ Better Auth (`better-auth`) with the Prisma adapter, email + password only, DB-b
 
 - **Monorepo**: root `package.json` defines `workspaces: ["client", "server"]`; each workspace has its own `package.json` and `tsconfig.json`. Use `bun run --filter <client|server> <script>` (or the root `dev`/`dev:server`/`dev:client` scripts) rather than `cd`-ing in for routine runs.
 - **Server**: Express 5 + TypeScript, run directly via Bun (no build step for dev). API routes live under `/api/*`. PostgreSQL via Prisma 7 (`@prisma/adapter-pg`); the client is generated to `server/generated/prisma` and imported through the singleton in `server/src/lib/db.ts` — import `prisma` from there rather than constructing a new `PrismaClient`.
-- **Client**: Vite + React 19 + TypeScript, with Tailwind v4 and shadcn/Base UI for styling (see *UI components* above). Routing is `react-router`; `ProtectedLayout` gates routes on a Better Auth session and redirects to `/login`. In dev, Vite proxies `/api` to `http://localhost:3001` (see `client/vite.config.ts`), so the client always calls relative `/api/...` paths rather than a hardcoded host.
+- **Client**: Vite + React 19 + TypeScript, with Tailwind v4 and shadcn/Base UI for styling (see *UI components* above). Routing is `react-router` (routes in `client/src/App.tsx`); `ProtectedLayout` gates routes on a Better Auth session and redirects to `/login`, and `AdminRoute` nests inside it to gate `/users` on the admin role. In dev, Vite proxies `/api` to `http://localhost:3001` (see `client/vite.config.ts`), so the client always calls relative `/api/...` paths rather than a hardcoded host.
 - **Linting**: client uses `oxlint` (`client/.oxlintrc.json`); no lint config exists for the server yet.
 
 ### Target architecture (per `tech-stack.md` / `implementation-plan.md`, not yet implemented)
 
-- Admin-facing user management: an admin creates and manages agent accounts (auth itself is done — see *Authentication* — but there is no admin UI or role-gated endpoint yet).
+- Admin-facing user management: an admin creates and manages agent accounts. In progress — the `/users` route and its admin gate exist, but the page is a bare heading and there is no role-gated endpoint behind it yet.
 - Tickets have status (Open/Resolved/Closed) and category (General Question/Technical Question/Refund Request).
 - AI features via the Claude API: auto-classification, ticket summaries, and suggested replies, backed by a knowledge base.
 - Inbound tickets created via email webhook (SendGrid/Mailgun); outbound replies sent through the same provider, threaded to the originating ticket.

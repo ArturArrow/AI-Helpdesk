@@ -13,8 +13,12 @@ export const auth = betterAuth({
   user: {
     additionalFields: {
       role: {
+        // required + defaultValue: the column is non-nullable with a DB default, so this
+        // types `user.role` as "admin" | "agent" rather than widening it with null/undefined.
+        // Safe despite input: false — parseInputData fills the default before it can ever
+        // throw "role is required".
         type: ["admin", "agent"],
-        required: false,
+        required: true,
         defaultValue: "agent",
         // Server-owned: never accepted from API input.
         input: false,

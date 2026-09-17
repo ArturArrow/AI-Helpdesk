@@ -4,9 +4,10 @@ import { authClient } from '../lib/auth-client.ts'
 
 type NavbarProps = {
   userName: string
+  isAdmin: boolean
 }
 
-function Navbar({ userName }: NavbarProps) {
+function Navbar({ userName, isAdmin }: NavbarProps) {
   const navigate = useNavigate()
   const [signingOut, setSigningOut] = useState(false)
 
@@ -19,9 +20,19 @@ function Navbar({ userName }: NavbarProps) {
   return (
     <header className="border-b border-gray-200 bg-white">
       <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-        <Link to="/" className="text-lg font-semibold text-gray-900">
-          Helpdesk
-        </Link>
+        <div className="flex items-center gap-6">
+          <Link to="/" className="text-lg font-semibold text-gray-900">
+            Helpdesk
+          </Link>
+          {isAdmin && (
+            <Link
+              to="/users"
+              className="text-sm font-medium text-gray-700 hover:text-gray-900"
+            >
+              Users
+            </Link>
+          )}
+        </div>
         <div className="flex items-center gap-4">
           <span className="text-sm text-gray-700">{userName}</span>
           <button
