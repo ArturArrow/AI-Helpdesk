@@ -1,19 +1,33 @@
 import cors from "cors";
-import express from "express";
+import express, { type ErrorRequestHandler } from "express";
 import { toNodeHandler } from "better-auth/node";
-import { auth } from "./lib/auth";
+import { auth, CLIENT_IP_HEADER } from "./lib/auth";
 import { prisma } from "./lib/db";
+import { CLIENT_URL } from "./lib/env";
+import { requireAdmin } from "./middleware/requireAdmin";
 import { requireAuth } from "./middleware/requireAuth";
 
 const app = express();
 const port = process.env.PORT ?? 3001;
 
-app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }));
+app.use(cors({ origin: CLIENT_URL, credentials: true }));
+
+// Always overwritten, so a client-supplied value never reaches the rate limiter.
+// req.ip is the socket address; behind a reverse proxy, set app.set("trust proxy", ...)
+// to the proxy's address so it resolves to the real client instead.
+app.use("/api/auth", (req, _res, next) => {
+  if (req.ip) req.headers[CLIENT_IP_HEADER] = req.ip;
+  else delete req.headers[CLIENT_IP_HEADER];
+  next();
+});
 
 // Must be mounted before express.json(), which would consume the request body.
 app.all("/api/auth/*splat", toNodeHandler(auth));
 
 app.use(express.json());
+
+// Every /api/users route is admin-only; guarding the prefix covers routes added later.
+app.use("/api/users", requireAuth, requireAdmin);
 
 app.get("/api/me", requireAuth, (req, res) => {
   res.json({ user: req.user });
@@ -32,6 +46,17 @@ app.get("/api/health/db", async (_req, res) => {
     res.status(503).json({ status: "error" });
   }
 });
+
+// Must stay last. Without it Express's finalhandler renders err.stack whenever
+// NODE_ENV isn't "production" — e.g. a malformed JSON body or a DB error in requireAuth.
+// http-errors (used by express.json()) marks client errors as safe to show via `expose`.
+const errorHandler: ErrorRequestHandler = (err, _req, res, next) => {
+  if (res.headersSent) return next(err);
+  const status = Number.isInteger(err?.status) && err.status >= 400 && err.status < 600 ? err.status : 500;
+  if (status >= 500) console.error(err);
+  res.status(status).json({ error: err?.expose ? err.message : "Internal Server Error" });
+};
+app.use(errorHandler);
 
 app.listen(port, async () => {
   console.log(`Server listening on http://localhost:${port}`);
