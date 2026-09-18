@@ -2,7 +2,7 @@ node_modules
 dist
 .env
 *.log
-test-results/
+/e2e/test-results/
 playwright-report/
 blob-report/
 playwright/.cache/

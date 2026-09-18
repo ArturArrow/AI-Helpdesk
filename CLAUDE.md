@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Early-stage, through the auth phase and starting on user management. PostgreSQL + Prisma are wired up (`server/prisma/schema.prisma`, two migrations, an idempotent admin `seed.ts`), and Better Auth provides session auth with a `role` field on users (`server/src/lib/auth.ts`, `requireAuth` / `requireAdmin` middleware). The client has routing, a protected layout, a login form built on shadcn, and an admin-gated `/users` page that is still only a heading. Playwright is configured against a separate `helpdesk_test` database, but no tests are written yet.
+Early-stage, through the auth phase and starting on user management. PostgreSQL + Prisma are wired up (`server/prisma/schema.prisma`, two migrations, an idempotent admin `seed.ts`), and Better Auth provides session auth with a `role` field on users (`server/src/lib/auth.ts`, `requireAuth` / `requireAdmin` middleware). The client has routing, a protected layout, a login form built on shadcn, and an admin-gated `/users` page that is still only a heading. Playwright runs against a separate `helpdesk_test` database, with 52 passing E2E tests covering auth: login, sessions, logout, route gating and the API guards (`e2e/TEST_SUMMARY.md`).
 
 Not yet built: ticket CRUD, AI integration, email in/out, and the dashboard. See `project-scope.md`, `tech-stack.md`, and `implementation-plan.md` for the intended design and build order before adding features, since the target architecture below is still ahead of the current state.
 
@@ -66,11 +66,13 @@ bun run --filter server db:deploy   # prisma migrate deploy
 bun run --filter server db:seed     # idempotent; never overwrites an existing admin password
 ```
 
-E2E tests (Playwright, repo root, against a separate `helpdesk_test` database; no tests written yet):
+E2E tests (Playwright, repo root, against a separate `helpdesk_test` database):
 ```bash
 bun run test:e2e        # playwright test
 bun run test:e2e:ui     # playwright test --ui
 ```
+
+Specs live in `e2e/tests/`, shared credentials and helpers in `e2e/fixtures/` (`auth.ts`: `signInViaApi`, `signInViaUi`, `signOutViaUi`, …), and run output in `e2e/test-results/` (gitignored). `e2e/TEST_SUMMARY.md` lists what every spec covers, what's deliberately not covered, and the last run's result. Read it before adding tests, to see what already exists.
 
 ### Writing E2E tests: use the `e2e-test-writer` agent
 
@@ -79,11 +81,13 @@ bun run test:e2e:ui     # playwright test --ui
 In the prompt, give it what it can't work out on its own:
 - **What to cover:** the page or flow (e.g. "login: happy path, validation errors, wrong password") and anything the user specifically asked for.
 - **What changed:** if the tests are for new work from this session, which files or routes changed.
-- **Consent to run, if any:** the agent can't ask the user. Before delegating, ask the user whether the suite should run (it resets `helpdesk_test`). If they agree, pass their consenting message **verbatim**, and the agent uses it as `PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION`. Never make up or paraphrase consent. Without it, the agent only type-checks and lists the tests.
+- **Don't pass consent to run.** In practice the agent refuses consent relayed through another agent, even quoted verbatim, so it only type-checks and lists the tests. Plan on running the suite yourself afterwards (below).
 
-**Afterwards:** the agent's report isn't shown to the user, so relay it. That means which specs were added and what each covers, the results of `tsc`, `--list` and the run (or that it didn't run), and any app change it said is needed to make something testable. The agent edits only `e2e/**` and, when needed, `playwright.config.ts`. It never touches `client/`, `server/` or `.env*`. If it reports that the app needs a change (e.g. a missing accessible label or endpoint), make that change in the main session with the user's go-ahead, then send the agent back to finish.
+**Afterwards:** the agent's report isn't shown to the user, so relay it. That means which specs were added and what each covers, the results of `tsc`, `--list` and the run (or that it didn't run), and any app change it said is needed to make something testable. The agent also rewrites `e2e/TEST_SUMMARY.md` every time it changes tests. The agent edits only `e2e/**` and, when needed, `playwright.config.ts`. It never touches `client/`, `server/` or `.env*`. If it reports that the app needs a change (e.g. a missing accessible label or endpoint), make that change in the main session with the user's go-ahead, then send the agent back to finish.
 
-**Running the suite yourself** (`bun run test:e2e`) follows the same rule: each run resets `helpdesk_test`, and Prisma refuses that reset from Claude Code without the user's explicit consent, so ask first.
+**Running the suite yourself.** Each run resets `helpdesk_test`, and Prisma refuses that reset from Claude Code without the user's explicit consent. So ask first, then run `PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION="<their exact message>" bun run test:e2e --reporter=line`. Consent covers one run: ask again after further changes. Then update the "Last run" line in `e2e/TEST_SUMMARY.md` with the result.
+- `webServer` never reuses a running server. If ports 3101/5174 are taken, the run fails with "…/api/health is already used". Usually that's the user's own `test:e2e:ui` window, so ask them to close it rather than killing the process.
+- Moving files or fixing import paths under `e2e/` is fine to do directly. Writing or changing test logic still goes to the agent.
 
 ## Authentication
 
@@ -97,7 +101,7 @@ It is also declared **`required: true` with `defaultValue: "agent"`**, which mir
 
 Role-based authorization is enforced **on the server** by `requireAdmin` (below). The client's `AdminRoute` only hides a page and does not protect data; never rely on it in place of the server check.
 
-**Creating accounts.** There is deliberately no committed script for agent accounts — the admin UI in the current phase is meant to replace that path. To make one ad hoc, mirror `prisma/seed.ts`: `await auth.$context` → `ctx.internalAdapter.createUser({ email, name, emailVerified: true, role: "agent" }, { method: "email-password" })` → `ctx.internalAdapter.linkAccount({ userId, providerId: "credential", accountId: userId, password: await ctx.password.hash(pw) })`. Going through `internalAdapter` matters: it hashes with Better Auth's own configured hasher, so a row written directly to the table will not authenticate. Pass credentials via environment variables rather than writing them into a file. `agent@example.com` was created this way for local testing.
+**Creating accounts.** There is deliberately no committed script for agent accounts — the admin UI in the current phase is meant to replace that path. To make one ad hoc, mirror `prisma/seed.ts`: `await auth.$context` → `ctx.internalAdapter.createUser({ email, name, emailVerified: true, role: "agent" }, { method: "email-password" })` → `ctx.internalAdapter.linkAccount({ userId, providerId: "credential", accountId: userId, password: await ctx.password.hash(pw) })`. Going through `internalAdapter` matters: it hashes with Better Auth's own configured hasher, so a row written directly to the table will not authenticate. Pass credentials via environment variables rather than writing them into a file. `agent@example.com` was created this way for local testing, and `e2e/seed-agent.ts` does the same in `helpdesk_test` on every E2E run.
 
 **Server wiring** (`server/src/index.ts`):
 - `app.all("/api/auth/*splat", toNodeHandler(auth))` is mounted **before `express.json()`**. Order matters — the JSON parser would consume the request body and break every auth endpoint. Keep any new middleware that reads the body below this line. (`*splat` is Express 5 wildcard syntax.)
