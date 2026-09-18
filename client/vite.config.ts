@@ -13,7 +13,8 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': 'http://localhost:3001',
+      // API_URL lets Playwright point the proxy at the test server (see playwright.config.ts).
+      '/api': process.env.API_URL ?? 'http://localhost:3001',
     },
   },
 })

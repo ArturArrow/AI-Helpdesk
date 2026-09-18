@@ -1,0 +1,16 @@
+{
+  // Type-checks the root Playwright files only; client/ and server/ have their own tsconfigs.
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["ES2023"],
+    // TypeScript 6 defaults `types` to [], so Node's (node:child_process, process) must be listed.
+    "types": ["node"],
+    "skipLibCheck": true,
+    "module": "nodenext",
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "strict": true
+  },
+  "include": ["playwright.config.ts", "e2e"]
+}

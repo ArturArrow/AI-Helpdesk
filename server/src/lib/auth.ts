@@ -9,6 +9,8 @@ export const CLIENT_IP_HEADER = "x-auth-client-ip";
 // Per-account sign-in throttle. The built-in limiter keys only on IP + path, so an attacker
 // rotating addresses gets a fresh bucket each time; this caps failed guesses per email
 // regardless of source. In memory, like the IP limiter: resets on restart, per instance.
+// Like the IP limiter, it runs only in production.
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const MAX_FAILED_SIGN_INS = 5;
 const SIGN_IN_LOCKOUT_MS = 15 * 60 * 1000;
 const failedSignIns = new Map<string, { count: number; firstFailureAt: number }>();
@@ -53,7 +55,7 @@ export const auth = betterAuth({
   },
   hooks: {
     before: createAuthMiddleware(async (ctx) => {
-      if (ctx.path !== "/sign-in/email") return;
+      if (!IS_PRODUCTION || ctx.path !== "/sign-in/email") return;
       const email = signInEmailKey(ctx.body);
       if (!email) return;
       const entry = activeFailures(email, Date.now());
@@ -65,7 +67,7 @@ export const auth = betterAuth({
       }
     }),
     after: createAuthMiddleware(async (ctx) => {
-      if (ctx.path !== "/sign-in/email") return;
+      if (!IS_PRODUCTION || ctx.path !== "/sign-in/email") return;
       const email = signInEmailKey(ctx.body);
       if (!email) return;
       const returned = ctx.context.returned;
@@ -90,8 +92,9 @@ export const auth = betterAuth({
     }),
   },
   trustedOrigins: [CLIENT_URL],
-  // Better Auth only enables this when NODE_ENV=production; keep it on regardless.
-  rateLimit: { enabled: true },
+  // Production only, so dev and Playwright runs aren't throttled. Matches Better Auth's
+  // default, stated here so it doesn't depend on it. Deploy with NODE_ENV=production.
+  rateLimit: { enabled: IS_PRODUCTION },
   advanced: {
     ipAddress: {
       // Set by index.ts from Express's req.ip, never taken from the client. Better Auth

@@ -50,9 +50,10 @@ Versions reflect the installed dependencies as of 2026-09-17. Sections marked **
 
 - SendGrid or Mailgun for outbound replies and inbound webhooks
 
-## Testing — Planned
+## Testing
 
-- No test runner is configured in either workspace
+- Playwright (`@playwright/test`, Chromium) for end-to-end tests, configured at the repo root; no tests written yet
+- Runs against a separate `helpdesk_test` PostgreSQL database, reset and seeded on every run
 
 ## Deployment — Planned
 

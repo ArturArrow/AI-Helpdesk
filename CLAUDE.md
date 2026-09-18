@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Early-stage, through the auth phase and starting on user management. PostgreSQL + Prisma are wired up (`server/prisma/schema.prisma`, two migrations, an idempotent admin `seed.ts`), and Better Auth provides session auth with a `role` field on users (`server/src/lib/auth.ts`, `requireAuth` / `requireAdmin` middleware). The client has routing, a protected layout, a login form built on shadcn, and an admin-gated `/users` page that is still only a heading.
+Early-stage, through the auth phase and starting on user management. PostgreSQL + Prisma are wired up (`server/prisma/schema.prisma`, two migrations, an idempotent admin `seed.ts`), and Better Auth provides session auth with a `role` field on users (`server/src/lib/auth.ts`, `requireAuth` / `requireAdmin` middleware). The client has routing, a protected layout, a login form built on shadcn, and an admin-gated `/users` page that is still only a heading. Playwright is configured against a separate `helpdesk_test` database, but no tests are written yet.
 
 Not yet built: ticket CRUD, AI integration, email in/out, and the dashboard. See `project-scope.md`, `tech-stack.md`, and `implementation-plan.md` for the intended design and build order before adding features, since the target architecture below is still ahead of the current state.
 
@@ -66,7 +66,24 @@ bun run --filter server db:deploy   # prisma migrate deploy
 bun run --filter server db:seed     # idempotent; never overwrites an existing admin password
 ```
 
-There are no test scripts configured in either workspace yet.
+E2E tests (Playwright, repo root, against a separate `helpdesk_test` database; no tests written yet):
+```bash
+bun run test:e2e        # playwright test
+bun run test:e2e:ui     # playwright test --ui
+```
+
+### Writing E2E tests: use the `e2e-test-writer` agent
+
+**Always delegate writing, extending or fixing Playwright tests to the project subagent `e2e-test-writer`** (`.claude/agents/e2e-test-writer.md`, via the Agent tool with `subagent_type: "e2e-test-writer"`). Don't write specs in `e2e/` directly in the main session. The agent file holds the harness details (ports, `helpdesk_test`, global setup and teardown, the root tsconfig) and the test conventions, and nothing about them is repeated here.
+
+In the prompt, give it what it can't work out on its own:
+- **What to cover:** the page or flow (e.g. "login: happy path, validation errors, wrong password") and anything the user specifically asked for.
+- **What changed:** if the tests are for new work from this session, which files or routes changed.
+- **Consent to run, if any:** the agent can't ask the user. Before delegating, ask the user whether the suite should run (it resets `helpdesk_test`). If they agree, pass their consenting message **verbatim**, and the agent uses it as `PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION`. Never make up or paraphrase consent. Without it, the agent only type-checks and lists the tests.
+
+**Afterwards:** the agent's report isn't shown to the user, so relay it. That means which specs were added and what each covers, the results of `tsc`, `--list` and the run (or that it didn't run), and any app change it said is needed to make something testable. The agent edits only `e2e/**` and, when needed, `playwright.config.ts`. It never touches `client/`, `server/` or `.env*`. If it reports that the app needs a change (e.g. a missing accessible label or endpoint), make that change in the main session with the user's go-ahead, then send the agent back to finish.
+
+**Running the suite yourself** (`bun run test:e2e`) follows the same rule: each run resets `helpdesk_test`, and Prisma refuses that reset from Claude Code without the user's explicit consent, so ask first.
 
 ## Authentication
 
@@ -84,8 +101,8 @@ Role-based authorization is enforced **on the server** by `requireAdmin` (below)
 
 **Server wiring** (`server/src/index.ts`):
 - `app.all("/api/auth/*splat", toNodeHandler(auth))` is mounted **before `express.json()`**. Order matters — the JSON parser would consume the request body and break every auth endpoint. Keep any new middleware that reads the body below this line. (`*splat` is Express 5 wildcard syntax.)
-- **Rate limiting** is forced on with `rateLimit: { enabled: true }`; Better Auth's own default only enables it when `NODE_ENV=production`. Better Auth reads the client IP only from headers and never from the socket, and without config it trusts a single-value `X-Forwarded-For`, which a caller can forge to get a new bucket on every request. So `index.ts` overwrites the `x-auth-client-ip` header (`CLIENT_IP_HEADER`) with Express's `req.ip` on every `/api/auth` request, and `auth.ts` reads only that header. **Behind a reverse proxy, set `app.set("trust proxy", <proxy address>)`**, or every client resolves to the proxy's IP and shares one sign-in bucket (3 requests per 10s), which locks everyone out. The limiter's store is in memory: it resets on restart and isn't shared across instances; switch to `storage: "database"` (this needs a `rateLimit` model) before running more than one.
-- **Per-account sign-in throttle.** The built-in limiter keys only on IP + path (`customRules` can change `window`/`max` but not the key), so rotating addresses bypasses it. `hooks.before`/`hooks.after` in `auth.ts` count 401s on `/sign-in/email` per lower-cased email and return 429 after 5 failures in 15 minutes; a successful sign-in clears the count. It's in memory, like the IP limiter. The trade-off: anyone can lock a known email out for 15 minutes, which is the price of capping guesses.
+- **Rate limiting runs only in production**: `rateLimit: { enabled: IS_PRODUCTION }` (`NODE_ENV === "production"`), which also gates the per-account throttle below. This matches Better Auth's own default (`enabled: options.rateLimit?.enabled ?? isProduction` in `dist/context/create-context.mjs`), stated explicitly so it doesn't hinge on that default. Dev and Playwright runs sign in unthrottled. **A deploy without `NODE_ENV=production` has no brute-force protection at all.** Better Auth reads the client IP only from headers and never from the socket, and without config it trusts a single-value `X-Forwarded-For`, which a caller can forge to get a new bucket on every request. So `index.ts` overwrites the `x-auth-client-ip` header (`CLIENT_IP_HEADER`) with Express's `req.ip` on every `/api/auth` request, and `auth.ts` reads only that header. **Behind a reverse proxy, set `app.set("trust proxy", <proxy address>)`**, or every client resolves to the proxy's IP and shares one sign-in bucket (3 requests per 10s), which locks everyone out. The limiter's store is in memory: it resets on restart and isn't shared across instances; switch to `storage: "database"` (this needs a `rateLimit` model) before running more than one.
+- **Per-account sign-in throttle.** The built-in limiter keys only on IP + path (`customRules` can change `window`/`max` but not the key), so rotating addresses bypasses it. `hooks.before`/`hooks.after` in `auth.ts` count 401s on `/sign-in/email` per lower-cased email and return 429 after 5 failures in 15 minutes; a successful sign-in clears the count. It's in memory and production-only, like the IP limiter. The trade-off: anyone can lock a known email out for 15 minutes, which is the price of capping guesses.
 - `requireAuth` (`server/src/middleware/requireAuth.ts`) resolves the session via `auth.api.getSession` with `fromNodeHeaders(req.headers)`, replies `401 {"error":"Unauthorized"}` when absent, and otherwise populates `req.user` / `req.session`. Those are declared in `server/src/types/express.d.ts`. Use it on every protected route; `/api/me` is the reference example.
 - `requireAdmin` (`server/src/middleware/requireAdmin.ts`) replies `403 {"error":"Forbidden"}` unless `req.user.role === "admin"`. It reads `req.user`, so it must run **after** `requireAuth`. `index.ts` mounts both on the whole prefix — `app.use("/api/users", requireAuth, requireAdmin)` — so any route added under `/api/users` is admin-only without its own guard. Put other admin-only endpoints under a guarded prefix the same way. The role comes from the DB-backed session lookup on every request (no cookie cache), so a demotion takes effect on the next request.
 - A JSON **error handler is mounted last** in `index.ts`. Keep it below every route: without it Express's finalhandler returns `err.stack` as HTML whenever `NODE_ENV` isn't `production`, and since `express.json()` runs before the `/api/users` guard, even an unauthenticated malformed body would get one. It shows `err.message` only when http-errors marks it `expose` (4xx from body parsing); otherwise it returns a generic `500` and logs the error on the server. Route handlers can just `throw`, because Express 5 forwards rejected promises here.
@@ -105,7 +122,7 @@ It works because the import is types-only. `verbatimModuleSyntax` erases it, so 
 
 **Client route gating.** `AdminRoute` (`client/src/components/AdminRoute.tsx`) is a layout route that renders `<Outlet />` for `role === 'admin'` and otherwise redirects to `/`. Nest it inside `ProtectedLayout` — it assumes a session already exists and does not re-check. `Navbar` takes an `isAdmin` prop from `ProtectedLayout` (which already holds the session) and hides admin links for agents, so the navbar stays presentational rather than reading the session itself. If its prop list grows much further, pass `session.user` whole instead of adding a third flag.
 
-**Environment.** `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `CLIENT_URL`. The last three are validated in `server/src/lib/env.ts`, which throws at import when any is missing or empty — the server (and the seed, which imports `auth`) refuses to start rather than letting Better Auth fall back to its public default secret outside production or `cors` fall back to `*`. Import them from there instead of reading `process.env` directly. The seed additionally needs `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and optionally `ADMIN_NAME` (defaults to "Admin").
+**Environment.** `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `CLIENT_URL`. The last three are validated in `server/src/lib/env.ts`, which throws at import when any is missing or empty — the server (and the seed, which imports `auth`) refuses to start rather than letting Better Auth fall back to its public default secret outside production or `cors` fall back to `*`. Import them from there instead of reading `process.env` directly. The seed additionally needs `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and optionally `ADMIN_NAME` (defaults to "Admin"). `NODE_ENV` is not validated but matters: only `production` turns on sign-in rate limiting (above), and `start:test` runs with `test` from `server/.env.test`.
 
 **Seeding** (`server/prisma/seed.ts`) is idempotent and safe against production. It validates the email shape and the password against Better Auth's own `minPasswordLength`/`maxPasswordLength`, refuses the placeholder `admin@example.com` when `NODE_ENV=production`, creates the user plus a `credential` account with a hashed password (mirroring what the disabled sign-up endpoint would do), and on re-run only ensures the `admin` role — **an existing password is never overwritten**. It also repairs a user left without a credential account by a half-failed run.
 
@@ -123,6 +140,6 @@ It works because the import is types-only. `verbatimModuleSyntax` erases it, so 
 - AI features via the Claude API: auto-classification, ticket summaries, and suggested replies, backed by a knowledge base.
 - Inbound tickets created via email webhook (SendGrid/Mailgun); outbound replies sent through the same provider, threaded to the originating ticket.
 - Dashboard aggregating ticket counts/breakdowns.
-- Deployment via Docker (Dockerfiles + Compose planned, not yet written).
+- Deployment via Docker (Dockerfiles + Compose planned, not yet written). The image must set `NODE_ENV=production`, or sign-in rate limiting stays off.
 
 Build in the phase order laid out in `implementation-plan.md` (setup → auth → user management → ticket CRUD → AI features → email → dashboard → polish/deploy) rather than jumping ahead to later phases.
