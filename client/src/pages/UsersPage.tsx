@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import axios from 'axios'
+import { Skeleton } from '@/components/ui/skeleton.tsx'
 import {
   Table,
   TableBody,
@@ -33,12 +34,10 @@ function UsersPage() {
         <p role="alert" className="text-sm text-destructive">
           Couldn't load users: {errorMessage(error)}
         </p>
-      ) : !users ? (
-        <p className="text-muted-foreground">Loading…</p>
-      ) : users.length === 0 ? (
+      ) : users?.length === 0 ? (
         <p className="text-muted-foreground">No users yet.</p>
       ) : (
-        <Table>
+        <Table aria-busy={!users}>
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
@@ -48,14 +47,23 @@ function UsersPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {users.map((user) => (
-              <TableRow key={user.id}>
-                <TableCell className="font-medium">{user.name}</TableCell>
-                <TableCell>{user.email}</TableCell>
-                <TableCell className="capitalize">{user.role}</TableCell>
-                <TableCell>{new Date(user.createdAt).toLocaleDateString()}</TableCell>
-              </TableRow>
-            ))}
+            {users
+              ? users.map((user) => (
+                  <TableRow key={user.id}>
+                    <TableCell className="font-medium">{user.name}</TableCell>
+                    <TableCell>{user.email}</TableCell>
+                    <TableCell className="capitalize">{user.role}</TableCell>
+                    <TableCell>{new Date(user.createdAt).toLocaleDateString()}</TableCell>
+                  </TableRow>
+                ))
+              : Array.from({ length: 3 }, (_, i) => (
+                  <TableRow key={i}>
+                    <TableCell><Skeleton className="h-4 w-28" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-44" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-14" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                  </TableRow>
+                ))}
           </TableBody>
         </Table>
       )}

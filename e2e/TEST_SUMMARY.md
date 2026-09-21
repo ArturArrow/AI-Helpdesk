@@ -4,7 +4,7 @@
 
 - **Date:** 2026-09-21
 - **Discovered (`--list`):** 56 tests in 5 files
-- **Result:** 56 passed, 0 failed, 25.5s (chromium, 1 worker), with the user list page on TanStack Query + axios.
+- **Result:** 56 passed, 0 failed, 21.0s (chromium, 1 worker), with the user list page on TanStack Query + axios and skeleton loading states.
 
 ## tests/login.spec.ts
 
@@ -87,7 +87,7 @@
 - **Rate limiting and the per-account sign-in throttle:** production-only and off under `NODE_ENV=test`. Testing them needs a separate `webServer` with `NODE_ENV=production`.
 - **Origin/CSRF checks:** Better Auth sets `skipOriginCheck` to `true` when `isTest()`, which also skips CSRF. Testing them needs a server configured to keep those checks on.
 - **A role demotion taking effect on the next request:** needs a direct DB role change, and there is no endpoint for it yet.
-- **The "Loading…" and "No users yet." states on `/users`:** not tested. The empty state can't happen with the seeded users, and holding the request only to see "Loading…" adds little.
+- **The loading skeleton and "No users yet." states on `/users`:** not tested. The empty state can't happen with the seeded users, and holding the request only to see the loading skeleton adds little.
 - **Not built yet:** the rest of admin user management (creating, editing and deleting users; only the list exists), ticket CRUD, AI features, email, and the dashboard.
 
 ## Open questions
