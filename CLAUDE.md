@@ -55,47 +55,14 @@ bun run test            # component tests, single pass (vitest run)
 bun run test:watch      # watch mode for writing tests (reruns on save)
 ```
 
-### Component tests (Vitest + React Testing Library)
+### Writing component tests: use the `component-test-writer` agent
 
-Component tests run in jsdom with Vitest, configured in the `test` block of `client/vite.config.ts`. They need no server or database, so unlike the E2E suite they can be run any time without asking.
+**Always delegate writing, extending or fixing component tests** (Vitest + React Testing Library, `client/src/**/*.test.tsx`) to the project subagent `component-test-writer` (`.claude/agents/component-test-writer.md`, via the Agent tool with `subagent_type: "component-test-writer"`). Don't write test files in the main session. The agent file holds the harness and the conventions, and nothing about them is repeated here.
 
-**Running:**
-```bash
-bun run --filter client test         # single pass, exits; use this to check work
-bun run --filter client test:watch   # reruns on save while writing tests
-cd client && bunx vitest run src/pages/UsersPage.test.tsx   # one file
-```
-`bun run build` type-checks test files too (they're under `src/`, inside `tsconfig.app.json`), so a test with a type error breaks the build.
-
-**Writing.** Write component tests in the main session; the `e2e-test-writer` agent is only for Playwright. `client/src/pages/UsersPage.test.tsx` is the reference file.
-- Put the test next to its component as `<Component>.test.tsx`, and import the component with an explicit `.tsx` extension.
-- Import `describe`/`it`/`expect`/`vi` from `vitest`. Globals are off, so `client/src/test/setup.ts` registers Testing Library's `cleanup` and the jest-dom matchers (`toBeInTheDocument`, `toHaveAttribute`, …). Don't turn on `globals: true` instead.
-- Render any component that uses `useQuery` with `renderWithQuery(<Page />)` from `@/test/render.tsx`, which gives each test a fresh `QueryClient` with `retry: false`. Put new shared providers there too (e.g. a `MemoryRouter` when a component under test needs routing) rather than wrapping inline in each file.
-- Stub HTTP with `vi.spyOn(axios, 'get')` (`mockResolvedValue({ data })`, `mockReturnValue(new Promise(() => {}))` for loading) and `vi.restoreAllMocks()` in `afterEach`. Don't `vi.mock('axios')`: the page calls `axios.isAxiosError`, which an auto-mock replaces. For error paths, reject with a real `AxiosError`, passing `{ status } as AxiosResponse` when the UI shows the status.
-- Query the way a user or screen reader would: `getByRole` with `name`, then `getByText`. Wait for async data with `findBy*`, and check absence with `queryBy*` + `.not.toBeInTheDocument()`. Don't select by class names or `data-slot`.
-- Cover each state the component renders: loading, data, empty and error.
-- After writing a test, break the code it covers once and confirm the test fails, then restore it.
-
-Server (`cd server`):
-```bash
-bun run start           # bun run src/index.ts (no watch)
-bun run db:migrate      # prisma migrate dev (development only)
-bun run db:seed         # create/repair the admin from ADMIN_EMAIL / ADMIN_PASSWORD
-```
-
-New database (production) — needs `DATABASE_URL`, `BETTER_AUTH_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` in the environment:
-```bash
-bun run --filter server db:deploy   # prisma migrate deploy
-bun run --filter server db:seed     # idempotent; never overwrites an existing admin password
-```
-
-E2E tests (Playwright, repo root, against a separate `helpdesk_test` database):
-```bash
-bun run test:e2e        # playwright test
-bun run test:e2e:ui     # playwright test --ui
-```
-
-Specs live in `e2e/tests/`, shared credentials and helpers in `e2e/fixtures/` (`auth.ts`: `signInViaApi`, `signInViaUi`, `signOutViaUi`, …), and run output in `e2e/test-results/` (gitignored). `e2e/TEST_SUMMARY.md` lists what every spec covers, what's deliberately not covered, and the last run's result. Read it before adding tests, to see what already exists.
+- **In the prompt,** say what to cover (the component and the states or cases the user asked for) and what changed, if the tests are for new work from this session.
+- **It runs the checks itself:** `vitest run`, `tsc -b` and lint. It also breaks the covered code once to prove the tests can fail, then restores it. No database is involved, so no consent is needed, and you can run `bun run --filter client test` any time.
+- **It edits only** `client/src/**/*.test.tsx` and `client/src/test/`. If it reports that the app needs a change (e.g. a missing accessible name) or a new package (e.g. `@testing-library/user-event`), make it in the main session with the user's go-ahead, then send the agent back.
+- **Afterwards,** relay its report, since the user doesn't see it: the files and tests added, the results and the break-it check. Then run `git diff --stat` to confirm the app files are unchanged.
 
 ### Writing E2E tests: use the `e2e-test-writer` agent
 
