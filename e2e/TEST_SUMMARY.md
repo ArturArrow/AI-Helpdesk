@@ -2,9 +2,10 @@
 
 ## Last run
 
-- **Date:** 2026-09-18
-- **Discovered (`--list`):** 52 tests in 4 files
-- **Result:** 52 passed, 0 failed, 22.5s (chromium, 1 worker), with specs in `tests/` and helpers in `fixtures/`.
+- **Date:** 2026-09-21
+- **Discovered (`--list`):** 56 tests in 5 files
+- **Result:** not run since the user list tests were added (`users.spec.ts`, updated `/api/users` guard).
+- **Previous result (before this change):** 52 passed, 0 failed, 22.5s (chromium, 1 worker).
 
 ## tests/login.spec.ts
 
@@ -50,12 +51,19 @@
 - `/api/me` returns 401 with a forged session cookie.
 - `/api/me` returns 200 with email, name and role, and no password field. One test each for admin and agent.
 - A wrong password and an unknown email get the same 401 and the same message.
-- The `/api/users` guard, for GET `/api/users`, GET `/api/users/:id`, POST `/api/users` and DELETE `/api/users/:id` (4 tests): 401 unauthenticated, 403 for the agent, and 404 for the admin (passes the guard; no routes exist yet).
+- The `/api/users` guard, for GET `/api/users`, GET `/api/users/:id`, POST `/api/users` and DELETE `/api/users/:id` (4 tests): 401 unauthenticated and 403 for the agent on all four. The admin gets 200 on GET `/api/users` and 404 on the other three (they pass the guard, but no such routes exist).
 - POST `/api/auth/sign-up/email` returns 400 `EMAIL_PASSWORD_SIGN_UP_DISABLED`, and the credentials can't sign in afterwards.
 - A sign-up with `role: "admin"` in the payload is refused and creates no account.
 - An agent's `{role:"admin"}` to `/api/auth/update-user` gets 400 "role is not allowed to be set", and `/api/me` still says agent.
 - A `role` sent together with `name` is refused as a whole.
 - A malformed JSON body to `/api/users` gets a JSON 400 with no HTML and no stack frames. One test each unauthenticated and as admin.
+
+## tests/users.spec.ts
+
+- Admin GET `/api/users` returns 200 with a `users` array that holds the seeded admin (role `admin`) and agent (role `agent`). Every user has exactly `id`, `name`, `email`, `role`, `createdAt`, and `createdAt` parses as a date.
+- `/api/users` is ordered by `createdAt` ascending.
+- The admin on `/users` sees a table with the column headers Name, Email, Role, Created and one row each for the admin and the agent, with name, email, role and a date. No alert is shown.
+- When `/api/users` is intercepted with a 500, the page shows the alert "Couldn't load users: Request failed (500)" and no table.
 
 ## Harness helpers
 
@@ -80,7 +88,8 @@
 - **Rate limiting and the per-account sign-in throttle:** production-only and off under `NODE_ENV=test`. Testing them needs a separate `webServer` with `NODE_ENV=production`.
 - **Origin/CSRF checks:** Better Auth sets `skipOriginCheck` to `true` when `isTest()`, which also skips CSRF. Testing them needs a server configured to keep those checks on.
 - **A role demotion taking effect on the next request:** needs a direct DB role change, and there is no endpoint for it yet.
-- **Not built yet:** admin user management (no `/api/users` routes, no UI), ticket CRUD, AI features, email, and the dashboard.
+- **The "Loading…" and "No users yet." states on `/users`:** not tested. The empty state can't happen with the seeded users, and holding the request only to see "Loading…" adds little.
+- **Not built yet:** the rest of admin user management (creating, editing and deleting users; only the list exists), ticket CRUD, AI features, email, and the dashboard.
 
 ## Open questions
 

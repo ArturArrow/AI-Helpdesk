@@ -6,6 +6,7 @@ import { prisma } from "./lib/db";
 import { CLIENT_URL } from "./lib/env";
 import { requireAdmin } from "./middleware/requireAdmin";
 import { requireAuth } from "./middleware/requireAuth";
+import { usersRouter } from "./routes/users";
 
 const app = express();
 const port = process.env.PORT ?? 3001;
@@ -27,7 +28,7 @@ app.all("/api/auth/*splat", toNodeHandler(auth));
 app.use(express.json());
 
 // Every /api/users route is admin-only; guarding the prefix covers routes added later.
-app.use("/api/users", requireAuth, requireAdmin);
+app.use("/api/users", requireAuth, requireAdmin, usersRouter);
 
 app.get("/api/me", requireAuth, (req, res) => {
   res.json({ user: req.user });

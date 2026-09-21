@@ -48,13 +48,14 @@ test.describe('POST /api/auth/sign-in/email', () => {
 })
 
 test.describe('/api/users guard', () => {
-  for (const [method, path] of [
-    ['GET', '/api/users'],
-    ['GET', '/api/users/some-id'],
-    ['POST', '/api/users'],
-    ['DELETE', '/api/users/some-id'],
+  // Only GET /api/users is routed; the rest fall through the guard to a 404 for the admin.
+  for (const [method, path, adminStatus] of [
+    ['GET', '/api/users', 200],
+    ['GET', '/api/users/some-id', 404],
+    ['POST', '/api/users', 404],
+    ['DELETE', '/api/users/some-id', 404],
   ] as const) {
-    test(`${method} ${path}: 401 unauthenticated, 403 agent, passes the guard for admin`, async ({
+    test(`${method} ${path}: 401 unauthenticated, 403 agent, ${adminStatus} admin`, async ({
       playwright,
       baseURL,
     }) => {
@@ -75,9 +76,8 @@ test.describe('/api/users guard', () => {
         expect(g.status()).toBe(403)
         expect(await g.json()).toEqual({ error: 'Forbidden' })
 
-        // No /api/users routes exist yet, so an admin falls through the guard to a 404.
         const d = await call(admin)
-        expect(d.status()).toBe(404)
+        expect(d.status()).toBe(adminStatus)
       } finally {
         await Promise.all([anon.dispose(), agent.dispose(), admin.dispose()])
       }

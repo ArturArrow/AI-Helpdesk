@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Early-stage, through the auth phase and starting on user management. PostgreSQL + Prisma are wired up (`server/prisma/schema.prisma`, two migrations, an idempotent admin `seed.ts`), and Better Auth provides session auth with a `role` field on users (`server/src/lib/auth.ts`, `requireAuth` / `requireAdmin` middleware). The client has routing, a protected layout, a login form built on shadcn, and an admin-gated `/users` page that is still only a heading. Playwright runs against a separate `helpdesk_test` database, with 52 passing E2E tests covering auth: login, sessions, logout, route gating and the API guards (`e2e/TEST_SUMMARY.md`).
+Early-stage, through the auth phase and starting on user management. PostgreSQL + Prisma are wired up (`server/prisma/schema.prisma`, two migrations, an idempotent admin `seed.ts`), and Better Auth provides session auth with a `role` field on users (`server/src/lib/auth.ts`, `requireAuth` / `requireAdmin` middleware). The client has routing, a protected layout, a login form built on shadcn, and an admin-gated `/users` page that lists users in a table from `GET /api/users` (`server/src/routes/users.ts`). Playwright runs against a separate `helpdesk_test` database, with 52 passing E2E tests covering auth: login, sessions, logout, route gating and the API guards (`e2e/TEST_SUMMARY.md`).
 
 Not yet built: ticket CRUD, AI integration, email in/out, and the dashboard. See `project-scope.md`, `tech-stack.md`, and `implementation-plan.md` for the intended design and build order before adding features, since the target architecture below is still ahead of the current state.
 
@@ -139,7 +139,7 @@ It works because the import is types-only. `verbatimModuleSyntax` erases it, so 
 
 ### Target architecture (per `tech-stack.md` / `implementation-plan.md`, not yet implemented)
 
-- Admin-facing user management: an admin creates and manages agent accounts. In progress — the `/users` route, its client gate and the server-side `/api/users` admin guard exist, but the page is a bare heading and no `/api/users` route is defined yet.
+- Admin-facing user management: an admin creates and manages agent accounts. In progress — listing is done (`GET /api/users` returns `id, name, email, role, createdAt` via an explicit `select`; `UsersPage` renders it). Create, edit and delete are not built yet. `usersRouter` is mounted on the same line as the guard (`app.use("/api/users", requireAuth, requireAdmin, usersRouter)`), so add new user routes to that router.
 - Tickets have status (Open/Resolved/Closed) and category (General Question/Technical Question/Refund Request).
 - AI features via the Claude API: auto-classification, ticket summaries, and suggested replies, backed by a knowledge base.
 - Inbound tickets created via email webhook (SendGrid/Mailgun); outbound replies sent through the same provider, threaded to the originating ticket.
