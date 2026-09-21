@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import axios from 'axios'
 import {
   Table,
   TableBody,
@@ -17,32 +18,22 @@ type User = {
 }
 
 function UsersPage() {
-  const [users, setUsers] = useState<User[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    const controller = new AbortController()
-    fetch('/api/users', { signal: controller.signal })
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`Request failed (${res.status})`)
-        const body: { users: User[] } = await res.json()
-        setUsers(body.users)
-      })
-      .catch((err: unknown) => {
-        if (controller.signal.aborted) return
-        setError(err instanceof Error ? err.message : 'Request failed')
-      })
-    return () => controller.abort()
-  }, [])
+  const { data: users, error } = useQuery({
+    queryKey: ['users'],
+    queryFn: async () => {
+      const res = await axios.get<{ users: User[] }>('/api/users')
+      return res.data.users
+    },
+  })
 
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">Users</h1>
       {error ? (
         <p role="alert" className="text-sm text-destructive">
-          Couldn't load users: {error}
+          Couldn't load users: {errorMessage(error)}
         </p>
-      ) : users === null ? (
+      ) : !users ? (
         <p className="text-muted-foreground">Loading…</p>
       ) : users.length === 0 ? (
         <p className="text-muted-foreground">No users yet.</p>
@@ -70,6 +61,11 @@ function UsersPage() {
       )}
     </div>
   )
+}
+
+function errorMessage(error: Error) {
+  const status = axios.isAxiosError(error) ? error.response?.status : undefined
+  return status ? `Request failed (${status})` : 'Request failed'
 }
 
 export default UsersPage

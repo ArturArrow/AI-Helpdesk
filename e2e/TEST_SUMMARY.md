@@ -4,8 +4,7 @@
 
 - **Date:** 2026-09-21
 - **Discovered (`--list`):** 56 tests in 5 files
-- **Result:** not run since the user list tests were added (`users.spec.ts`, updated `/api/users` guard).
-- **Previous result (before this change):** 52 passed, 0 failed, 22.5s (chromium, 1 worker).
+- **Result:** 56 passed, 0 failed, 25.5s (chromium, 1 worker), with the user list page on TanStack Query + axios.
 
 ## tests/login.spec.ts
 
