@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import path from 'node:path'
@@ -16,5 +17,9 @@ export default defineConfig({
       // API_URL lets Playwright point the proxy at the test server (see playwright.config.ts).
       '/api': process.env.API_URL ?? 'http://localhost:3001',
     },
+  },
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.ts'],
   },
 })

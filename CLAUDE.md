@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Early-stage, through the auth phase and starting on user management. PostgreSQL + Prisma are wired up (`server/prisma/schema.prisma`, two migrations, an idempotent admin `seed.ts`), and Better Auth provides session auth with a `role` field on users (`server/src/lib/auth.ts`, `requireAuth` / `requireAdmin` middleware). The client has routing, a protected layout, a login form built on shadcn, and an admin-gated `/users` page that lists users in a table from `GET /api/users` (`server/src/routes/users.ts`). Playwright runs against a separate `helpdesk_test` database, with 52 passing E2E tests covering auth: login, sessions, logout, route gating and the API guards (`e2e/TEST_SUMMARY.md`).
+Early-stage, through the auth phase and starting on user management. PostgreSQL + Prisma are wired up (`server/prisma/schema.prisma`, two migrations, an idempotent admin `seed.ts`), and Better Auth provides session auth with a `role` field on users (`server/src/lib/auth.ts`, `requireAuth` / `requireAdmin` middleware). The client has routing, a protected layout, a login form built on shadcn, and an admin-gated `/users` page that lists users in a table from `GET /api/users` (`server/src/routes/users.ts`). `UsersPage` has Vitest + React Testing Library component tests (`bun run --filter client test`). Playwright runs against a separate `helpdesk_test` database, with 52 passing E2E tests covering auth: login, sessions, logout, route gating and the API guards (`e2e/TEST_SUMMARY.md`).
 
 Not yet built: ticket CRUD, AI integration, email in/out, and the dashboard. See `project-scope.md`, `tech-stack.md`, and `implementation-plan.md` for the intended design and build order before adding features, since the target architecture below is still ahead of the current state.
 
@@ -51,7 +51,30 @@ Client (`cd client`):
 bun run build           # tsc -b && vite build
 bun run lint            # oxlint
 bun run preview          # preview production build
+bun run test            # component tests, single pass (vitest run)
+bun run test:watch      # watch mode for writing tests (reruns on save)
 ```
+
+### Component tests (Vitest + React Testing Library)
+
+Component tests run in jsdom with Vitest, configured in the `test` block of `client/vite.config.ts`. They need no server or database, so unlike the E2E suite they can be run any time without asking.
+
+**Running:**
+```bash
+bun run --filter client test         # single pass, exits; use this to check work
+bun run --filter client test:watch   # reruns on save while writing tests
+cd client && bunx vitest run src/pages/UsersPage.test.tsx   # one file
+```
+`bun run build` type-checks test files too (they're under `src/`, inside `tsconfig.app.json`), so a test with a type error breaks the build.
+
+**Writing.** Write component tests in the main session; the `e2e-test-writer` agent is only for Playwright. `client/src/pages/UsersPage.test.tsx` is the reference file.
+- Put the test next to its component as `<Component>.test.tsx`, and import the component with an explicit `.tsx` extension.
+- Import `describe`/`it`/`expect`/`vi` from `vitest`. Globals are off, so `client/src/test/setup.ts` registers Testing Library's `cleanup` and the jest-dom matchers (`toBeInTheDocument`, `toHaveAttribute`, …). Don't turn on `globals: true` instead.
+- Render any component that uses `useQuery` with `renderWithQuery(<Page />)` from `@/test/render.tsx`, which gives each test a fresh `QueryClient` with `retry: false`. Put new shared providers there too (e.g. a `MemoryRouter` when a component under test needs routing) rather than wrapping inline in each file.
+- Stub HTTP with `vi.spyOn(axios, 'get')` (`mockResolvedValue({ data })`, `mockReturnValue(new Promise(() => {}))` for loading) and `vi.restoreAllMocks()` in `afterEach`. Don't `vi.mock('axios')`: the page calls `axios.isAxiosError`, which an auto-mock replaces. For error paths, reject with a real `AxiosError`, passing `{ status } as AxiosResponse` when the UI shows the status.
+- Query the way a user or screen reader would: `getByRole` with `name`, then `getByText`. Wait for async data with `findBy*`, and check absence with `queryBy*` + `.not.toBeInTheDocument()`. Don't select by class names or `data-slot`.
+- Cover each state the component renders: loading, data, empty and error.
+- After writing a test, break the code it covers once and confirm the test fails, then restore it.
 
 Server (`cd server`):
 ```bash
