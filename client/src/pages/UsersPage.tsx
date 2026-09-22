@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import axios from 'axios'
+import CreateUserDialog from '@/components/CreateUserDialog.tsx'
 import { Skeleton } from '@/components/ui/skeleton.tsx'
 import {
   Table,
@@ -29,7 +30,10 @@ function UsersPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Users</h1>
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="text-2xl font-semibold">Users</h1>
+        <CreateUserDialog />
+      </div>
       {error ? (
         <p role="alert" className="text-sm text-destructive">
           Couldn't load users: {errorMessage(error)}
