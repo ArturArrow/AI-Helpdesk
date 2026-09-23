@@ -4,7 +4,7 @@ import axios from 'axios'
 import { AlertCircleIcon, Loader2Icon, PlusIcon } from 'lucide-react'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { z } from 'zod'
+import { createUserSchema, type CreateUserInput } from 'core/schemas/users'
 import { Alert, AlertDescription } from '@/components/ui/alert.tsx'
 import { Button } from '@/components/ui/button.tsx'
 import {
@@ -20,15 +20,7 @@ import {
 import { Input } from '@/components/ui/input.tsx'
 import { Label } from '@/components/ui/label.tsx'
 
-const createUserSchema = z.object({
-  name: z.string().trim().min(3, 'Name must be at least 3 characters'),
-  email: z.email('Enter a valid email address'),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
-})
-
-type CreateUserForm = z.infer<typeof createUserSchema>
-
-function CreateUserDialog() {
+function CreateUserForm() {
   const [open, setOpen] = useState(false)
   const queryClient = useQueryClient()
   const {
@@ -37,13 +29,13 @@ function CreateUserDialog() {
     reset,
     setError,
     formState: { errors },
-  } = useForm<CreateUserForm>({
+  } = useForm<CreateUserInput>({
     resolver: zodResolver(createUserSchema),
     defaultValues: { name: '', email: '', password: '' },
   })
 
   const createUser = useMutation({
-    mutationFn: (values: CreateUserForm) => axios.post('/api/users', values),
+    mutationFn: (values: CreateUserInput) => axios.post('/api/users', values),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['users'] })
       setOpen(false)
@@ -163,4 +155,4 @@ function CreateUserDialog() {
   )
 }
 
-export default CreateUserDialog
+export default CreateUserForm

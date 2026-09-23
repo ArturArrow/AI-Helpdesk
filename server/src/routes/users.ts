@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { z } from "zod";
+import { createUserSchema } from "core/schemas/users";
 import { auth } from "../lib/auth";
 import { Role } from "../../generated/prisma/enums";
 import { prisma } from "../lib/db";
@@ -19,17 +19,7 @@ usersRouter.get("/", async (_req, res) => {
 
 usersRouter.post("/", async (req, res) => {
   const ctx = await auth.$context;
-  const { minPasswordLength, maxPasswordLength } = ctx.password.config;
-  const schema = z.object({
-    name: z.string().trim().min(3, "Name must be at least 3 characters"),
-    email: z.string().trim().toLowerCase().pipe(z.email("Enter a valid email address")),
-    password: z
-      .string()
-      .min(minPasswordLength, `Password must be at least ${minPasswordLength} characters`)
-      .max(maxPasswordLength, `Password must be at most ${maxPasswordLength} characters`),
-  });
-
-  const parsed = schema.safeParse(req.body);
+  const parsed = createUserSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.issues[0]!.message });
     return;
