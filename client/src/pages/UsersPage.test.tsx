@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent, { type UserEvent } from '@testing-library/user-event'
 import axios, { AxiosError, type AxiosResponse } from 'axios'
+import { Role } from 'core/roles'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderWithQuery } from '@/test/render.tsx'
 import UsersPage from './UsersPage.tsx'
@@ -10,14 +11,14 @@ const users = [
     id: '1',
     name: 'Ada Admin',
     email: 'admin@example.com',
-    role: 'admin',
+    role: Role.admin,
     createdAt: '2026-01-15T12:00:00.000Z',
   },
   {
     id: '2',
     name: 'Alan Agent',
     email: 'agent@example.com',
-    role: 'agent',
+    role: Role.agent,
     createdAt: '2026-03-02T12:00:00.000Z',
   },
 ]
@@ -88,6 +89,27 @@ describe('UsersPage', () => {
     expect(screen.getByRole('dialog', { name: 'Edit user' })).toBeInTheDocument()
     expect(screen.getByLabelText('Name')).toHaveValue('Alan Agent')
     expect(screen.getByLabelText('Email')).toHaveValue('agent@example.com')
+  })
+
+  it('renders a delete button in agent rows but not in the admin row', async () => {
+    mockGet().mockResolvedValue({ data: { users } })
+    renderWithQuery(<UsersPage />)
+    await screen.findByRole('cell', { name: 'Ada Admin' })
+
+    const [, adminRow, agentRow] = within(screen.getByRole('table')).getAllByRole('row')
+    expect(within(adminRow!).queryByRole('button', { name: /^Delete/ })).not.toBeInTheDocument()
+    expect(within(agentRow!).getByRole('button', { name: 'Delete Alan Agent' })).toBeInTheDocument()
+  })
+
+  it('opens the delete confirmation for the row\'s user', async () => {
+    const user = userEvent.setup()
+    mockGet().mockResolvedValue({ data: { users } })
+    renderWithQuery(<UsersPage />)
+    await user.click(await screen.findByRole('button', { name: 'Delete Alan Agent' }))
+
+    expect(screen.getByRole('dialog', { name: 'Delete user' })).toHaveAccessibleDescription(
+      "Delete Alan Agent (agent@example.com)? They will be signed out and won't be able to sign in.",
+    )
   })
 
   it('shows an empty state instead of the table when there are no users', async () => {

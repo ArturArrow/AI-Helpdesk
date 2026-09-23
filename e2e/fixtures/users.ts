@@ -21,3 +21,9 @@ export async function createUserViaApi(request: APIRequestContext, label = 'user
   const { user } = await res.json()
   return { ...data, id: user.id }
 }
+
+// Soft-deletes a user through DELETE /api/users/:id. `request` must be signed in as the admin.
+export async function deleteUserViaApi(request: APIRequestContext, id: string) {
+  const res = await request.delete(`/api/users/${id}`)
+  expect(res.status(), `delete ${id}`).toBe(204)
+}

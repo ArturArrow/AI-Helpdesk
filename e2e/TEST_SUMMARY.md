@@ -3,8 +3,9 @@
 ## Last run
 
 - **Date:** 2026-09-23
-- **Discovered (`--list`):** 67 tests in 5 files
-- **Result:** 67 passed, 0 failed, 24.5s (chromium, 1 worker), after extracting the shared body `validate` helper in `server/src/routes/users.ts`.
+- **Discovered (`--list`):** 82 tests in 5 files
+- **Result:** 82 passed, 0 failed, 37.4s (chromium, 1 worker), after replacing role string literals with the `Role` enum (`core/roles` on the client, the Prisma enum on the server).
+- **Previous result, from before this change:** 67 passed, 0 failed, 24.5s (chromium, 1 worker).
 
 ## tests/login.spec.ts
 
@@ -50,7 +51,7 @@
 - `/api/me` returns 401 with a forged session cookie.
 - `/api/me` returns 200 with email, name and role, and no password field. One test each for admin and agent.
 - A wrong password and an unknown email get the same 401 and the same message.
-- The `/api/users` guard, for GET `/api/users`, GET `/api/users/:id`, POST `/api/users`, PATCH `/api/users/:id` and DELETE `/api/users/:id` (5 tests): 401 unauthenticated and 403 for the agent on all five. The admin passes the guard: 200 on GET `/api/users`, 400 on POST (the body has no password), 404 on PATCH (unknown id), and 404 on the unrouted GET/DELETE by id.
+- The `/api/users` guard, for GET `/api/users`, GET `/api/users/:id`, POST `/api/users`, PATCH `/api/users/:id` and DELETE `/api/users/:id` (5 tests): 401 unauthenticated and 403 for the agent on all five. The admin passes the guard: 200 on GET `/api/users`, 400 on POST (the body has no password), 404 on PATCH and DELETE (unknown id), and 404 on the unrouted GET by id.
 - POST `/api/auth/sign-up/email` returns 400 `EMAIL_PASSWORD_SIGN_UP_DISABLED`, and the credentials can't sign in afterwards.
 - A sign-up with `role: "admin"` in the payload is refused and creates no account.
 - An agent's `{role:"admin"}` to `/api/auth/update-user` gets 400 "role is not allowed to be set", and `/api/me` still says agent.
@@ -61,7 +62,7 @@
 
 - Admin GET `/api/users` returns 200 with a `users` array that holds the seeded admin (role `admin`) and agent (role `agent`). Every user has exactly `id`, `name`, `email`, `role`, `createdAt`, and `createdAt` parses as a date.
 - `/api/users` is ordered by `createdAt` ascending.
-- The admin on `/users` sees a table with the column headers Name, Email, Role, Created and Actions (screen-reader only), and one row each for the admin and the agent, with name, email, role, a date and an `Edit <name>` button. No alert is shown.
+- The admin on `/users` sees a table with the column headers Name, Email, Role, Created and Actions (screen-reader only), and one row each for the admin and the agent, with name, email, role, a date and an `Edit <name>` button. The agent row has a `Delete <name>` button and the admin row doesn't. No alert is shown.
 - When `/api/users` is intercepted with a 500, the page shows the alert "Couldn't load users: Request failed (500)" and no table.
 - Edit dialog: opens from `Edit <name>` titled "Edit user", with the blank-password hint, the row's name and email, and an empty password.
 - Edit dialog: changing name and (upper-cased) email closes the dialog, the row shows the new name and lower-cased email, the old email is gone, and both hold after a reload.
@@ -73,6 +74,21 @@
 - Admin PATCH with a short name, an invalid email or a short password gets 400 with the schema message, and the user is unchanged.
 - Admin PATCH on an unknown id gets 404 `{"error":"User not found"}`.
 - PATCH as the agent gets 403 and unauthenticated gets 401. The user is unchanged and still signs in with the original password.
+- Delete dialog: opens from `Delete <name>` titled "Delete user", with "Delete <name> (<email>)? They will be signed out and won't be able to sign in.", enabled Cancel and Delete buttons, and no alert.
+- Delete dialog: the admin row has an `Edit` button but no `Delete…` button.
+- Delete dialog: Delete gets a 204, the dialog closes, the row is gone (the agent's stays), and it stays gone after a reload.
+- Delete dialog: Cancel closes the dialog, sends no DELETE, and the row is still there after a reload.
+- Delete dialog: if the user is deleted elsewhere while the dialog is open, Delete shows the server's "User not found" alert and the dialog stays open.
+- A deleted user's existing session gets 401 `{"error":"Unauthorized"}` from `/api/me`.
+- A deleted user signing in through the API with the correct password gets 401 with the same message as a wrong password, and no session.
+- A deleted user signing in through the UI with the correct password sees "Invalid email or password" and stays on `/login` with no navbar.
+- Admin DELETE `/api/users/:id` gets 204 with an empty body. The user is gone from GET `/api/users`; the seeded admin and agent remain.
+- Admin DELETE on their own (the seeded admin's) id gets 403 `{"error":"Admins cannot be deleted"}`. The session stays valid, the admin is still listed and still signs in.
+- Admin DELETE on an unknown id gets 404 `{"error":"User not found"}`.
+- Deleting the same user twice gets 404 `{"error":"User not found"}` the second time.
+- DELETE as the agent gets 403 and unauthenticated gets 401. The user is still listed and still signs in.
+- PATCH on a deleted user gets 404 `{"error":"User not found"}`.
+- POST `/api/users` with a deleted user's email gets 409 "A user with this email already exists", and the email doesn't reappear in the list.
 
 ## Harness helpers
 
@@ -87,8 +103,9 @@
   - `expectRedirectToLogin(page, path)` visits `path` and asserts the app lands on `/login`.
 - **`fixtures/users.ts`:**
   - `uniqueSuffix()` returns a timestamp plus a random tag, for names and emails that don't collide across tests or re-runs.
-  - `createUserViaApi(request, label)` creates an agent through POST `/api/users` (the request must be signed in as the admin), asserts 201 and returns its credentials and `id`. Tests that mutate users create their own, so the seeded admin and agent never change.
-  - `users.spec.ts` keeps its own `userRow`, `openEditDialog` and `trackPatchRequests`, which only it uses.
+  - `createUserViaApi(request, label)` creates an agent through POST `/api/users` (the request must be signed in as the admin), asserts 201 and returns its credentials and `id`. Tests that mutate or delete users create their own, so the seeded admin and agent never change.
+  - `deleteUserViaApi(request, id)` soft-deletes a user through DELETE `/api/users/:id` (signed in as the admin) and asserts 204.
+  - `users.spec.ts` keeps its own `userRow`, `openEditDialog`, `openDeleteDialog`, `trackRequests` and `postSignIn`, which only it uses.
 - Helpers are plain exported functions: no page objects and no `test.extend` fixtures. `login.spec.ts` keeps its own `trackSignInRequests`, which only the validation tests use.
 - **`global-setup.ts`:** runs the test-DB guard, `prisma migrate reset --force`, the admin seed, then `seed-agent.ts`. Each run starts with two users: the admin and the agent.
 - **`seed-agent.ts`:** creates the agent through Better Auth's `internalAdapter`, like `prisma/seed.ts` creates the admin. It reads the credentials from `E2E_AGENT_*` environment variables and skips if the agent already exists.
@@ -104,9 +121,12 @@
 - **The loading skeleton and "No users yet." states on `/users`:** not tested. The empty state can't happen with the seeded users, and holding the request only to see the loading skeleton adds little.
 - **The "New user" dialog and POST `/api/users` behaviour:** built, but no E2E tests yet beyond the guard row and its use as a setup step in `createUserViaApi`. Not requested in this round.
 - **Editing a user's role:** PATCH accepts only name, email and password, so there is nothing to test.
-- **Not built yet:** deleting users, ticket CRUD, AI features, email, and the dashboard.
+- **Deleting an admin through the UI:** admin rows have no delete button, so it's covered only at the API (403).
+- **The "Deleting…" pending state:** not tested; it would need holding the DELETE request.
+- **Not built yet:** restoring a deleted user, ticket CRUD, AI features, email, and the dashboard.
 
 ## Open questions
 
 - **No return-to after login:** a user bounced from a deep link (e.g. `/users`) lands on `/` after signing in, not on the page they asked for. `routing.spec.ts` records this behaviour. If a return-to redirect is added, that test needs updating.
+- **A deleted user's email stays reserved:** POST and PATCH still see soft-deleted users, so the email can't be reused (409), and nothing in the UI shows why. `users.spec.ts` records this.
 - **App changes needed:** none. Every locator uses an accessible label, role or text.

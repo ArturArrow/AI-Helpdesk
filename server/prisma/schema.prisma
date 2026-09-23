@@ -24,6 +24,9 @@ model User {
   emailVerified Boolean   @default(false)
   image         String?
   role          Role      @default(agent)
+  // Soft delete: set instead of removing the row. Deleted users are hidden from lists and
+  // can't sign in (session.create hook in src/lib/auth.ts); their email stays reserved.
+  deletedAt     DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   sessions      Session[]

@@ -1,9 +1,11 @@
-import { useQuery } from '@tanstack/react-query'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent, { type UserEvent } from '@testing-library/user-event'
-import axios, { AxiosError, type AxiosResponse } from 'axios'
+import axios, { AxiosError } from 'axios'
+import { Role } from 'core/roles'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { httpError } from '@/test/http.ts'
 import { renderWithQuery } from '@/test/render.tsx'
+import { UsersQuery } from '@/test/UsersQuery.tsx'
 import UserForm from './UserForm.tsx'
 import type { User } from './UsersTable.tsx'
 
@@ -12,25 +14,9 @@ const created = {
     id: '3',
     name: 'Grace Hopper',
     email: 'grace@example.com',
-    role: 'agent',
+    role: Role.agent,
     createdAt: '2026-09-01T12:00:00.000Z',
   },
-}
-
-// Stands in for UsersPage: an active ['users'] query, so invalidation shows up as a refetch.
-function UsersQuery() {
-  useQuery({ queryKey: ['users'], queryFn: () => axios.get('/api/users') })
-  return null
-}
-
-function httpError(status: number, data?: { error: string }) {
-  return new AxiosError(
-    `Request failed with status code ${status}`,
-    'ERR_BAD_REQUEST',
-    undefined,
-    undefined,
-    { status, data } as AxiosResponse,
-  )
 }
 
 function renderForm() {
@@ -249,7 +235,7 @@ const existing: User = {
   id: '2',
   name: 'Alan Agent',
   email: 'agent@example.com',
-  role: 'agent',
+  role: Role.agent,
   createdAt: '2026-03-02T12:00:00.000Z',
 }
 

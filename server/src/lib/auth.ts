@@ -1,6 +1,8 @@
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { APIError, createAuthMiddleware, isAPIError } from "better-auth/api";
+import type { Role as SharedRole } from "core/roles";
+import { Role } from "../../generated/prisma/enums";
 import { prisma } from "./db";
 import { BETTER_AUTH_SECRET, BETTER_AUTH_URL, CLIENT_URL } from "./env";
 
@@ -45,11 +47,28 @@ export const auth = betterAuth({
         // types `user.role` as "admin" | "agent" rather than widening it with null/undefined.
         // Safe despite input: false — parseInputData fills the default before it can ever
         // throw "role is required".
-        type: ["admin", "agent"],
+        type: [Role.admin, Role.agent],
         required: true,
-        defaultValue: "agent",
+        defaultValue: Role.agent,
         // Server-owned: never accepted from API input.
         input: false,
+      },
+    },
+  },
+  databaseHooks: {
+    session: {
+      create: {
+        // Soft-deleted users can't get a session. This runs after the password check, so
+        // the answer matches a wrong password and doesn't reveal the account existed.
+        before: async (session) => {
+          const user = await prisma.user.findUnique({
+            where: { id: session.userId },
+            select: { deletedAt: true },
+          });
+          if (user?.deletedAt) {
+            throw new APIError("UNAUTHORIZED", { message: "Invalid email or password" });
+          }
+        },
       },
     },
   },
@@ -105,3 +124,8 @@ export const auth = betterAuth({
 });
 
 export type Session = typeof auth.$Infer.Session;
+
+// The client uses the Role from core/roles, which restates this enum. Fails to compile if
+// the two drift apart, e.g. after adding a role to schema.prisma but not to core.
+const rolesInSync: [Role, SharedRole] extends [SharedRole, Role] ? true : never = true;
+void rolesInSync;

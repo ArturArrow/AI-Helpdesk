@@ -1,3 +1,4 @@
+import { Role } from 'core/roles'
 import { Navigate, Outlet } from 'react-router'
 import { Skeleton } from '@/components/ui/skeleton.tsx'
 import { authClient } from '../lib/auth-client.ts'
@@ -30,7 +31,7 @@ function ProtectedLayout() {
 
   return (
     <div className="min-h-svh bg-gray-50">
-      <Navbar userName={session.user.name} isAdmin={session.user.role === 'admin'} />
+      <Navbar userName={session.user.name} isAdmin={session.user.role === Role.admin} />
       <main className="mx-auto max-w-6xl px-4 py-8">
         <Outlet />
       </main>

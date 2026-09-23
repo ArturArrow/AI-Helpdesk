@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "exports": {
+    "./roles": "./src/roles.ts",
     "./schemas/users": "./src/schemas/users.ts"
   },
   "dependencies": {

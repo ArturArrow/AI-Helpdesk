@@ -1,5 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import axios from 'axios'
+import { Role } from 'core/roles'
+import DeleteUserDialog from '@/components/DeleteUserDialog.tsx'
 import UserForm from '@/components/UserForm.tsx'
 import { Skeleton } from '@/components/ui/skeleton.tsx'
 import {
@@ -15,7 +17,7 @@ export type User = {
   id: string
   name: string
   email: string
-  role: 'admin' | 'agent'
+  role: Role
   createdAt: string
 }
 
@@ -55,8 +57,11 @@ function UsersTable() {
                 <TableCell>{user.email}</TableCell>
                 <TableCell className="capitalize">{user.role}</TableCell>
                 <TableCell>{new Date(user.createdAt).toLocaleDateString()}</TableCell>
-                <TableCell className="text-right">
-                  <UserForm user={user} />
+                <TableCell>
+                  <div className="flex justify-end gap-1">
+                    <UserForm user={user} />
+                    {user.role !== Role.admin && <DeleteUserDialog user={user} />}
+                  </div>
                 </TableCell>
               </TableRow>
             ))
@@ -66,7 +71,7 @@ function UsersTable() {
                 <TableCell><Skeleton className="h-4 w-44" /></TableCell>
                 <TableCell><Skeleton className="h-4 w-14" /></TableCell>
                 <TableCell><Skeleton className="h-4 w-20" /></TableCell>
-                <TableCell><Skeleton className="ml-auto size-7" /></TableCell>
+                <TableCell><Skeleton className="ml-auto h-7 w-15" /></TableCell>
               </TableRow>
             ))}
       </TableBody>

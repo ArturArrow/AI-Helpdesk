@@ -15,6 +15,12 @@ type Schema<T> = {
     | { success: false; error: { issues: { message: string }[] } };
 };
 
+// Soft-deleted users count as missing everywhere except the email uniqueness checks,
+// which still see them, so a deleted user's email stays reserved.
+function findActiveUser(id: string) {
+  return prisma.user.findUnique({ where: { id, deletedAt: null }, select: { role: true } });
+}
+
 // Parses the body, or replies 400 with the first issue and returns undefined.
 function validate<T>(schema: Schema<T>, req: Request, res: Response) {
   const parsed = schema.safeParse(req.body);
@@ -27,6 +33,7 @@ function validate<T>(schema: Schema<T>, req: Request, res: Response) {
 
 usersRouter.get("/", async (_req, res) => {
   const users = await prisma.user.findMany({
+    where: { deletedAt: null },
     select: userSelect,
     orderBy: { createdAt: "asc" },
   });
@@ -68,7 +75,7 @@ usersRouter.patch("/:id", async (req, res) => {
   const { name, email, password } = body;
   const { id } = req.params;
 
-  if (!(await ctx.internalAdapter.findUserById(id))) {
+  if (!(await findActiveUser(id))) {
     res.status(404).json({ error: "User not found" });
     return;
   }
@@ -89,4 +96,25 @@ usersRouter.patch("/:id", async (req, res) => {
 
   const user = await prisma.user.findUniqueOrThrow({ where: { id }, select: userSelect });
   res.json({ user });
+});
+
+usersRouter.delete("/:id", async (req, res) => {
+  const ctx = await auth.$context;
+  const { id } = req.params;
+
+  const user = await findActiveUser(id);
+  if (!user) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+  if (user.role === Role.admin) {
+    res.status(403).json({ error: "Admins cannot be deleted" });
+    return;
+  }
+
+  // Soft delete: keep the row, end the sessions. The session.create hook in auth.ts stops
+  // the user from signing in again.
+  await prisma.user.update({ where: { id }, data: { deletedAt: new Date() } });
+  await ctx.internalAdapter.deleteUserSessions(id);
+  res.status(204).end();
 });

@@ -49,7 +49,7 @@ test.describe('POST /api/auth/sign-in/email', () => {
 
 test.describe('/api/users guard', () => {
   // The admin passes the guard: GET lists, POST rejects the password-less body (400), PATCH
-  // finds no such user (404), and the unrouted GET/DELETE by id fall through to a 404.
+  // and DELETE find no such user (404), and the unrouted GET by id falls through to a 404.
   for (const [method, path, adminStatus] of [
     ['GET', '/api/users', 200],
     ['GET', '/api/users/some-id', 404],
