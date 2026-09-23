@@ -12,7 +12,8 @@ You write component tests for the client of this ticket management system (Bun m
 - **Commands:** `bun run --filter client test` runs every test once and exits. `bun run --filter client test:watch` reruns on save. From `client/`, `bunx vitest run src/pages/UsersPage.test.tsx` runs a single file.
 - **Globals are off.** Import `describe`, `it`, `expect`, `vi`, `afterEach` from `vitest` in every file. `client/src/test/setup.ts` loads `@testing-library/jest-dom/vitest` (matchers such as `toBeInTheDocument`, `toHaveAttribute`, `toHaveTextContent`) and registers `afterEach(cleanup)`, because Testing Library only auto-cleans up when a global `afterEach` exists. Don't switch on `globals: true`.
 - **Shared render helper:** `client/src/test/render.tsx` exports `renderWithQuery(ui, options?)`. It passes a fresh `QueryClient` (`retry: false`, as in `client/src/main.tsx`) through RTL's `wrapper` option, so `rerender()` stays inside the provider too.
-- **Installed:** `vitest`, `jsdom`, `@testing-library/react`, `@testing-library/dom`, `@testing-library/jest-dom`. `@testing-library/user-event` is **not** installed. If a test needs interaction (typing, clicking), say so in your report and let the caller add it. Don't install packages yourself.
+- **Installed:** `vitest`, `jsdom`, `@testing-library/react`, `@testing-library/dom`, `@testing-library/jest-dom`, `@testing-library/user-event`. If a test needs another package, say so in your report and let the caller add it. Don't install packages yourself.
+- **Interaction:** use `userEvent`, not `fireEvent`. Call `const user = userEvent.setup()` **before** rendering, and `await` every `user.click` / `user.type` / `user.keyboard` (so the test is `async`). Type the parameter as `UserEvent` (`import userEvent, { type UserEvent } from '@testing-library/user-event'`) when passing `user` into a helper.
 - **Type-checking:** test files live under `client/src`, so `tsconfig.app.json` includes them and `bun run build` (`tsc -b`) type-checks them. The config uses `verbatimModuleSyntax` (use `import type` / inline `type` for type-only imports), `noUnusedLocals`/`noUnusedParameters`, and `allowImportingTsExtensions`: import local files **with** their extension (`'./UsersPage.tsx'`, `'@/test/render.tsx'`).
 
 ## Writing tests
@@ -24,7 +25,7 @@ The reference file is `client/src/pages/UsersPage.test.tsx`. Read it before writ
 - **Rendering:** use `renderWithQuery(<Page />)` for anything that calls `useQuery`/`useMutation`. When a component needs another provider (e.g. `MemoryRouter` for components that use `Link`/`useNavigate`/`useParams`), add it to `client/src/test/render.tsx` once, as an option or a second small function. Don't wrap inline in each test file.
 - **HTTP:** stub with `vi.spyOn(axios, 'get')` (or `post`/`patch`/`delete`), and call `vi.restoreAllMocks()` in `afterEach`.
   - Data: `mockResolvedValue({ data: … })`, shaped like the real server response (read the route in `server/src/routes/`).
-  - Loading: `mockReturnValue(new Promise(() => {}))`.
+  - Loading: `mockReturnValue(new Promise(() => {}))`, but **only in tests that assert the pending state**. When the test is about something else (a button, a dialog), resolve with a realistic value such as `{ data: { users: [] } }`. A promise that never settles suggests the loading state matters to the test.
   - Errors: reject with a real `AxiosError`. When the UI shows the status, pass `{ status: 403 } as AxiosResponse` as the fifth argument.
   - Assert the request too, e.g. `expect(get).toHaveBeenCalledWith('/api/users')`.
   - **Don't `vi.mock('axios')`.** An auto-mock replaces `axios.isAxiosError`, which pages use to read error statuses.
@@ -34,6 +35,13 @@ The reference file is `client/src/pages/UsersPage.test.tsx`. Read it before writ
   - Scope queries with `within(table)` / `within(row)`.
   - Wait for async results with `findBy*`. Check absence with `queryBy*` + `.not.toBeInTheDocument()`.
   - Never select by class name, `data-slot` or DOM structure, and don't add `data-testid` to app code. Report the missing accessible name instead.
+  - The one exception is an element with no accessible name **by design** (often `aria-hidden`), such as a dialog's overlay. Select it with `document.querySelector('[data-slot="…"]')` and don't walk up through `parentElement`. Add a one-line comment saying why.
+- **Base UI dialogs and popups** (checked in `@base-ui/react` 1.8.0, `dialog/root/useDialogRoot.mjs` and `floating-ui-react/hooks/useDismiss.mjs`):
+  - **Escape:** a `keydown` listener on `document` handles it, so `await user.keyboard('{Escape}')` works.
+  - **Outside click:** when a backdrop exists, only a click on the backdrop itself closes the dialog, and only after a primary-button `pointerdown` while it's open. `await user.click(backdrop)` sends that whole sequence. A bare `fireEvent.click` does nothing. jsdom does no hit-testing, so clicking page content won't close it. Don't reach for `pointerEventsCheck: 0`: if user-event refuses a click, report it.
+  - **The backdrop:** there are two, Base UI's internal one and the shadcn overlay. Both are `role="presentation"`, `aria-hidden` and unnamed. Get the overlay with `document.querySelector('[data-slot="dialog-overlay"]')!` (set by `DialogOverlay` in `client/src/components/ui/dialog.tsx`). Don't use `getAllByRole('presentation').at(-1)`, which depends on DOM order.
+  - **Closing:** jsdom has no `getAnimations`, so the dialog unmounts right away. Still assert with `waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())`.
+  - `UsersPage.test.tsx` ("new user dialog" block) is the reference.
 - **What to cover:** each state the component renders (loading, data, empty, error), what the user sees in each, and the request it makes. Test behaviour, not implementation: no assertions on hook calls, state or Tailwind classes. The exception is attributes that carry meaning, like `aria-busy` or `aria-invalid`.
 - **Assertions must be able to fail.** `toHaveTextContent('')` matches any element, so use `expect(el.textContent).toBe('')` for "empty". For locale-dependent output (`toLocaleDateString`), compute the expectation the same way the component does.
 - **Helpers stay minimal** (the user dislikes wrapper layers that don't earn their place): plain exported functions, no custom matchers, no factories for one-off data. Extract something into `client/src/test/` only when two or more test files need it.

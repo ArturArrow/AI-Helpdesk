@@ -1,4 +1,5 @@
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
+import userEvent, { type UserEvent } from '@testing-library/user-event'
 import axios, { AxiosError, type AxiosResponse } from 'axios'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderWithQuery } from '@/test/render.tsx'
@@ -89,5 +90,44 @@ describe('UsersPage', () => {
     renderWithQuery(<UsersPage />)
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/^Couldn't load users: Request failed$/)
+  })
+})
+
+describe('UsersPage new user dialog', () => {
+  function renderPage() {
+    const user = userEvent.setup()
+    mockGet().mockResolvedValue({ data: { users: [] } })
+    renderWithQuery(<UsersPage />)
+    return user
+  }
+
+  async function openDialog(user: UserEvent) {
+    await user.click(screen.getByRole('button', { name: 'New user' }))
+    return screen.getByRole('dialog', { name: 'New user' })
+  }
+
+  it('opens the create-user dialog from the New user button', async () => {
+    const user = renderPage()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    expect(await openDialog(user)).toHaveAccessibleDescription('Create an agent account.')
+  })
+
+  it('closes when the backdrop is clicked', async () => {
+    const user = renderPage()
+    await openDialog(user)
+    // The overlay is aria-hidden with no accessible name by design, so select it by its data-slot.
+    const overlay = document.querySelector('[data-slot="dialog-overlay"]')!
+    await user.click(overlay)
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('closes when Escape is pressed', async () => {
+    const user = renderPage()
+    await openDialog(user)
+    await user.keyboard('{Escape}')
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 })
