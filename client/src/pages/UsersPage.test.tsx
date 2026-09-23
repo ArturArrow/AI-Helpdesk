@@ -57,12 +57,37 @@ describe('UsersPage', () => {
       'Email',
       'Role',
       'Created',
+      'Actions',
     ])
 
     const [, ...bodyRows] = within(table).getAllByRole('row')
     expect(bodyRows.map((row) => within(row).getAllByRole('cell').map((td) => td.textContent))).toEqual(
-      users.map((u) => [u.name, u.email, u.role, new Date(u.createdAt).toLocaleDateString()]),
+      // The actions cell holds only an icon button, so it has no text.
+      users.map((u) => [u.name, u.email, u.role, new Date(u.createdAt).toLocaleDateString(), '']),
     )
+  })
+
+  it('renders an edit button in each user row', async () => {
+    mockGet().mockResolvedValue({ data: { users } })
+    renderWithQuery(<UsersPage />)
+    await screen.findByRole('cell', { name: 'Ada Admin' })
+
+    const [, ...bodyRows] = within(screen.getByRole('table')).getAllByRole('row')
+    expect(bodyRows).toHaveLength(users.length)
+    bodyRows.forEach((row, i) => {
+      expect(within(row).getByRole('button', { name: `Edit ${users[i]!.name}` })).toBeInTheDocument()
+    })
+  })
+
+  it('opens the edit dialog for the row\'s user', async () => {
+    const user = userEvent.setup()
+    mockGet().mockResolvedValue({ data: { users } })
+    renderWithQuery(<UsersPage />)
+    await user.click(await screen.findByRole('button', { name: 'Edit Alan Agent' }))
+
+    expect(screen.getByRole('dialog', { name: 'Edit user' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Name')).toHaveValue('Alan Agent')
+    expect(screen.getByLabelText('Email')).toHaveValue('agent@example.com')
   })
 
   it('shows an empty state instead of the table when there are no users', async () => {

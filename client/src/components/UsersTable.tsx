@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import axios from 'axios'
+import UserForm from '@/components/UserForm.tsx'
 import { Skeleton } from '@/components/ui/skeleton.tsx'
 import {
   Table,
@@ -10,7 +11,7 @@ import {
   TableRow,
 } from '@/components/ui/table.tsx'
 
-type User = {
+export type User = {
   id: string
   name: string
   email: string
@@ -41,6 +42,9 @@ function UsersTable() {
           <TableHead>Email</TableHead>
           <TableHead>Role</TableHead>
           <TableHead>Created</TableHead>
+          <TableHead>
+            <span className="sr-only">Actions</span>
+          </TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -51,6 +55,9 @@ function UsersTable() {
                 <TableCell>{user.email}</TableCell>
                 <TableCell className="capitalize">{user.role}</TableCell>
                 <TableCell>{new Date(user.createdAt).toLocaleDateString()}</TableCell>
+                <TableCell className="text-right">
+                  <UserForm user={user} />
+                </TableCell>
               </TableRow>
             ))
           : Array.from({ length: 3 }, (_, i) => (
@@ -59,6 +66,7 @@ function UsersTable() {
                 <TableCell><Skeleton className="h-4 w-44" /></TableCell>
                 <TableCell><Skeleton className="h-4 w-14" /></TableCell>
                 <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                <TableCell><Skeleton className="ml-auto size-7" /></TableCell>
               </TableRow>
             ))}
       </TableBody>

@@ -1,10 +1,10 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
-import { AlertCircleIcon, Loader2Icon, PlusIcon } from 'lucide-react'
+import { AlertCircleIcon, Loader2Icon, PencilIcon, PlusIcon } from 'lucide-react'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { createUserSchema, type CreateUserInput } from 'core/schemas/users'
+import { createUserSchema, updateUserSchema, type UpdateUserInput } from 'core/schemas/users'
 import { Alert, AlertDescription } from '@/components/ui/alert.tsx'
 import { Button } from '@/components/ui/button.tsx'
 import {
@@ -19,8 +19,10 @@ import {
 } from '@/components/ui/dialog.tsx'
 import { Input } from '@/components/ui/input.tsx'
 import { Label } from '@/components/ui/label.tsx'
+import type { User } from '@/components/UsersTable.tsx'
 
-function CreateUserForm() {
+// With a user, edits that user (a blank password keeps the current one); without, creates an agent.
+function UserForm({ user }: { user?: User }) {
   const [open, setOpen] = useState(false)
   const queryClient = useQueryClient()
   const {
@@ -29,17 +31,17 @@ function CreateUserForm() {
     reset,
     setError,
     formState: { errors },
-  } = useForm<CreateUserInput>({
-    resolver: zodResolver(createUserSchema),
-    defaultValues: { name: '', email: '', password: '' },
+  } = useForm<UpdateUserInput>({
+    resolver: zodResolver(user ? updateUserSchema : createUserSchema),
+    defaultValues: formValues(user),
   })
 
-  const createUser = useMutation({
-    mutationFn: (values: CreateUserInput) => axios.post('/api/users', values),
+  const saveUser = useMutation({
+    mutationFn: (values: UpdateUserInput) =>
+      user ? axios.patch(`/api/users/${user.id}`, values) : axios.post('/api/users', values),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['users'] })
       setOpen(false)
-      reset()
     },
     onError: (error) => {
       const status = axios.isAxiosError(error) ? error.response?.status : undefined
@@ -47,36 +49,49 @@ function CreateUserForm() {
       if (status === 409) {
         setError('email', { message: message ?? 'A user with this email already exists' })
       } else {
-        setError('root', { message: message ?? "Couldn't create user" })
+        setError('root', { message: message ?? (user ? "Couldn't update user" : "Couldn't create user") })
       }
     },
   })
 
   function onOpenChange(next: boolean) {
     setOpen(next)
-    // Reopening starts from an empty form rather than the last attempt.
-    if (!next) {
-      reset()
-      createUser.reset()
+    // Each opening starts from the current user (or an empty form), not the last attempt.
+    // Resetting on open rather than close picks up the refetched row after a save.
+    if (next) {
+      reset(formValues(user))
+      saveUser.reset()
     }
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogTrigger render={<Button />}>
-        <PlusIcon />
-        New user
-      </DialogTrigger>
+      {user ? (
+        <DialogTrigger
+          render={<Button variant="ghost" size="icon-sm" aria-label={`Edit ${user.name}`} />}
+        >
+          <PencilIcon />
+        </DialogTrigger>
+      ) : (
+        <DialogTrigger render={<Button />}>
+          <PlusIcon />
+          New user
+        </DialogTrigger>
+      )}
 
       <DialogContent>
         <form
-          onSubmit={handleSubmit((values) => createUser.mutate(values))}
+          onSubmit={handleSubmit((values) => saveUser.mutate(values))}
           noValidate
           className="flex flex-col gap-5"
         >
           <DialogHeader>
-            <DialogTitle>New user</DialogTitle>
-            <DialogDescription>Create an agent account.</DialogDescription>
+            <DialogTitle>{user ? 'Edit user' : 'New user'}</DialogTitle>
+            <DialogDescription>
+              {user
+                ? 'Leave the password blank to keep the current one.'
+                : 'Create an agent account.'}
+            </DialogDescription>
           </DialogHeader>
 
           {errors.root && (
@@ -144,9 +159,11 @@ function CreateUserForm() {
 
           <DialogFooter>
             <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
-            <Button type="submit" disabled={createUser.isPending}>
-              {createUser.isPending && <Loader2Icon className="animate-spin" />}
-              {createUser.isPending ? 'Creating…' : 'Create user'}
+            <Button type="submit" disabled={saveUser.isPending}>
+              {saveUser.isPending && <Loader2Icon className="animate-spin" />}
+              {user
+                ? saveUser.isPending ? 'Saving…' : 'Save changes'
+                : saveUser.isPending ? 'Creating…' : 'Create user'}
             </Button>
           </DialogFooter>
         </form>
@@ -155,4 +172,8 @@ function CreateUserForm() {
   )
 }
 
-export default CreateUserForm
+function formValues(user?: User) {
+  return { name: user?.name ?? '', email: user?.email ?? '', password: '' }
+}
+
+export default UserForm

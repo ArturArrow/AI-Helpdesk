@@ -2,9 +2,9 @@
 
 ## Last run
 
-- **Date:** 2026-09-21
-- **Discovered (`--list`):** 56 tests in 5 files
-- **Result:** 56 passed, 0 failed, 21.0s (chromium, 1 worker), with the user list page on TanStack Query + axios and skeleton loading states.
+- **Date:** 2026-09-23
+- **Discovered (`--list`):** 67 tests in 5 files
+- **Result:** 67 passed, 0 failed, 24.5s (chromium, 1 worker), after extracting the shared body `validate` helper in `server/src/routes/users.ts`.
 
 ## tests/login.spec.ts
 
@@ -50,7 +50,7 @@
 - `/api/me` returns 401 with a forged session cookie.
 - `/api/me` returns 200 with email, name and role, and no password field. One test each for admin and agent.
 - A wrong password and an unknown email get the same 401 and the same message.
-- The `/api/users` guard, for GET `/api/users`, GET `/api/users/:id`, POST `/api/users` and DELETE `/api/users/:id` (4 tests): 401 unauthenticated and 403 for the agent on all four. The admin gets 200 on GET `/api/users` and 404 on the other three (they pass the guard, but no such routes exist).
+- The `/api/users` guard, for GET `/api/users`, GET `/api/users/:id`, POST `/api/users`, PATCH `/api/users/:id` and DELETE `/api/users/:id` (5 tests): 401 unauthenticated and 403 for the agent on all five. The admin passes the guard: 200 on GET `/api/users`, 400 on POST (the body has no password), 404 on PATCH (unknown id), and 404 on the unrouted GET/DELETE by id.
 - POST `/api/auth/sign-up/email` returns 400 `EMAIL_PASSWORD_SIGN_UP_DISABLED`, and the credentials can't sign in afterwards.
 - A sign-up with `role: "admin"` in the payload is refused and creates no account.
 - An agent's `{role:"admin"}` to `/api/auth/update-user` gets 400 "role is not allowed to be set", and `/api/me` still says agent.
@@ -61,8 +61,18 @@
 
 - Admin GET `/api/users` returns 200 with a `users` array that holds the seeded admin (role `admin`) and agent (role `agent`). Every user has exactly `id`, `name`, `email`, `role`, `createdAt`, and `createdAt` parses as a date.
 - `/api/users` is ordered by `createdAt` ascending.
-- The admin on `/users` sees a table with the column headers Name, Email, Role, Created and one row each for the admin and the agent, with name, email, role and a date. No alert is shown.
+- The admin on `/users` sees a table with the column headers Name, Email, Role, Created and Actions (screen-reader only), and one row each for the admin and the agent, with name, email, role, a date and an `Edit <name>` button. No alert is shown.
 - When `/api/users` is intercepted with a 500, the page shows the alert "Couldn't load users: Request failed (500)" and no table.
+- Edit dialog: opens from `Edit <name>` titled "Edit user", with the blank-password hint, the row's name and email, and an empty password.
+- Edit dialog: changing name and (upper-cased) email closes the dialog, the row shows the new name and lower-cased email, the old email is gone, and both hold after a reload.
+- Edit dialog: saving with a blank password keeps the old password working, and the user's existing session still gets 200 from `/api/me`.
+- Edit dialog: a new password ends the user's existing session (`/api/me` 401), the old password gets 401 and the new one signs in.
+- Edit dialog: a 2-character name, `not-an-email` and a 5-character password show the three field errors with `aria-invalid="true"`. The dialog stays open, no PATCH is sent, and the row is unchanged after a reload.
+- Edit dialog: changing the email to the agent's gets a 409 and shows "A user with this email already exists" under the email field. The dialog stays open and nothing changes.
+- Admin PATCH `/api/users/:id` returns 200 with exactly `id`, `name`, `email`, `role`, `createdAt`, the name trimmed and the email lower-cased.
+- Admin PATCH with a short name, an invalid email or a short password gets 400 with the schema message, and the user is unchanged.
+- Admin PATCH on an unknown id gets 404 `{"error":"User not found"}`.
+- PATCH as the agent gets 403 and unauthenticated gets 401. The user is unchanged and still signs in with the original password.
 
 ## Harness helpers
 
@@ -75,7 +85,11 @@
   - `signInViaUi(page, user)` goes to `/login`, submits the form, and waits for `/`.
   - `signOutViaUi(page)` clicks Sign out and waits for `/login`.
   - `expectRedirectToLogin(page, path)` visits `path` and asserts the app lands on `/login`.
-  - Helpers are plain exported functions: no page objects and no `test.extend` fixtures. `login.spec.ts` keeps its own `trackSignInRequests`, which only the validation tests use.
+- **`fixtures/users.ts`:**
+  - `uniqueSuffix()` returns a timestamp plus a random tag, for names and emails that don't collide across tests or re-runs.
+  - `createUserViaApi(request, label)` creates an agent through POST `/api/users` (the request must be signed in as the admin), asserts 201 and returns its credentials and `id`. Tests that mutate users create their own, so the seeded admin and agent never change.
+  - `users.spec.ts` keeps its own `userRow`, `openEditDialog` and `trackPatchRequests`, which only it uses.
+- Helpers are plain exported functions: no page objects and no `test.extend` fixtures. `login.spec.ts` keeps its own `trackSignInRequests`, which only the validation tests use.
 - **`global-setup.ts`:** runs the test-DB guard, `prisma migrate reset --force`, the admin seed, then `seed-agent.ts`. Each run starts with two users: the admin and the agent.
 - **`seed-agent.ts`:** creates the agent through Better Auth's `internalAdapter`, like `prisma/seed.ts` creates the admin. It reads the credentials from `E2E_AGENT_*` environment variables and skips if the agent already exists.
 - **`global-teardown.ts`:** only logs. It leaves `helpdesk_test` intact for debugging.
@@ -86,9 +100,11 @@
 
 - **Rate limiting and the per-account sign-in throttle:** production-only and off under `NODE_ENV=test`. Testing them needs a separate `webServer` with `NODE_ENV=production`.
 - **Origin/CSRF checks:** Better Auth sets `skipOriginCheck` to `true` when `isTest()`, which also skips CSRF. Testing them needs a server configured to keep those checks on.
-- **A role demotion taking effect on the next request:** needs a direct DB role change, and there is no endpoint for it yet.
+- **A role demotion taking effect on the next request:** needs a direct DB role change; PATCH `/api/users/:id` doesn't change roles.
 - **The loading skeleton and "No users yet." states on `/users`:** not tested. The empty state can't happen with the seeded users, and holding the request only to see the loading skeleton adds little.
-- **Not built yet:** the rest of admin user management (creating, editing and deleting users; only the list exists), ticket CRUD, AI features, email, and the dashboard.
+- **The "New user" dialog and POST `/api/users` behaviour:** built, but no E2E tests yet beyond the guard row and its use as a setup step in `createUserViaApi`. Not requested in this round.
+- **Editing a user's role:** PATCH accepts only name, email and password, so there is nothing to test.
+- **Not built yet:** deleting users, ticket CRUD, AI features, email, and the dashboard.
 
 ## Open questions
 
