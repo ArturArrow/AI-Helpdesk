@@ -6,6 +6,7 @@
 - [x] Set up Express server with TypeScript
 - [x] Set up React app with TypeScript
 - [x] Set up PostgreSQL database
+- [x] Shared `core` workspace for zod schemas used by client and server
 
 ## Phase 2: Authentication
 
@@ -17,12 +18,14 @@
 
 ## Phase 3: User Management
 
-- [ ] Create user management page (admin only)
-- [ ] Implement create agent API endpoint
-- [ ] Implement list users API endpoint
-- [ ] Implement edit user API endpoint
-- [ ] Implement delete user API endpoint
-- [ ] Add role-based access control (admin vs agent)
+- [x] Create user management page (admin only) — `/users`, gated by `AdminRoute`
+- [x] Implement create agent API endpoint — `POST /api/users`
+- [x] Implement list users API endpoint — `GET /api/users`
+- [x] Implement edit user API endpoint — `PATCH /api/users/:id`
+- [x] Implement delete user API endpoint — soft delete via `deletedAt`, ends sessions
+- [x] Add role-based access control (admin vs agent) — `requireAdmin` on server, `AdminRoute` on client
+- [x] Component tests (Vitest + RTL)
+- [x] E2E tests (Playwright) for auth and user management
 
 ## Phase 4: Ticket CRUD
 

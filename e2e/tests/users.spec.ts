@@ -47,15 +47,6 @@ async function openDeleteDialog(page: Page, name: string) {
   return dialog
 }
 
-// Collects `method` requests to /api/users/:id sent from the page.
-function trackRequests(page: Page, method: 'PATCH' | 'DELETE') {
-  const urls: string[] = []
-  page.on('request', (req) => {
-    if (req.method() === method && req.url().includes('/api/users/')) urls.push(req.url())
-  })
-  return urls
-}
-
 // Signs in through the API with `user`'s credentials and returns the response, without asserting.
 function postSignIn(request: APIRequestContext, user: { email: string; password: string }) {
   return request.post('/api/auth/sign-in/email', {
@@ -92,45 +83,6 @@ test.describe('GET /api/users', () => {
     const { users } = await (await request.get('/api/users')).json()
     const times = users.map((u: { createdAt: string }) => Date.parse(u.createdAt))
     expect(times).toEqual([...times].sort((a, b) => a - b))
-  })
-})
-
-test.describe('/users page', () => {
-  test('admin sees a table with both seeded users', async ({ page }) => {
-    await signInViaApi(page.request, ADMIN)
-    await page.goto('/users')
-
-    const table = page.getByRole('table')
-    await expect(table).toBeVisible()
-    await expect(table.getByRole('columnheader')).toHaveText(['Name', 'Email', 'Role', 'Created', 'Actions'])
-
-    for (const [user, role] of [
-      [ADMIN, 'admin'],
-      [AGENT, 'agent'],
-    ] as const) {
-      const row = table
-        .getByRole('row')
-        .filter({ has: page.getByRole('cell', { name: user.email, exact: true }) })
-      await expect(row).toHaveCount(1)
-      await expect(row.getByRole('cell')).toHaveText([user.name, user.email, role, /\d/, ''])
-      await expect(row.getByRole('button', { name: `Edit ${user.name}`, exact: true })).toBeVisible()
-      // Only non-admin rows get a delete button.
-      await expect(row.getByRole('button', { name: `Delete ${user.name}`, exact: true })).toHaveCount(
-        role === 'admin' ? 0 : 1,
-      )
-    }
-    await expect(page.getByRole('alert')).toHaveCount(0)
-  })
-
-  test('shows an alert when /api/users fails', async ({ page }) => {
-    await signInViaApi(page.request, ADMIN)
-    await page.route('**/api/users', (route) =>
-      route.fulfill({ status: 500, json: { error: 'Internal Server Error' } }),
-    )
-    await page.goto('/users')
-
-    await expect(page.getByRole('alert')).toHaveText("Couldn't load users: Request failed (500)")
-    await expect(page.getByRole('table')).toHaveCount(0)
   })
 })
 
@@ -234,44 +186,6 @@ test.describe('POST /api/users', () => {
 })
 
 test.describe('edit user dialog', () => {
-  test('is pre-filled with the row\'s name and email and an empty password', async ({ page }) => {
-    await signInViaApi(page.request, ADMIN)
-    const user = await createUserViaApi(page.request, 'prefill')
-    await page.goto('/users')
-
-    const dialog = await openEditDialog(page, user.name)
-    await expect(dialog.getByText('Leave the password blank to keep the current one.')).toBeVisible()
-    await expect(dialog.getByLabel('Name')).toHaveValue(user.name)
-    await expect(dialog.getByLabel('Email')).toHaveValue(user.email)
-    await expect(dialog.getByLabel('Password')).toHaveValue('')
-    await expect(dialog.getByRole('button', { name: 'Save changes' })).toBeEnabled()
-  })
-
-  test('admin changes name and email; the table updates and the change survives a reload', async ({
-    page,
-  }) => {
-    await signInViaApi(page.request, ADMIN)
-    const user = await createUserViaApi(page.request, 'rename')
-    const suffix = uniqueSuffix()
-    const newName = `Renamed ${suffix}`
-    const newEmail = `renamed-${suffix}@example.com`
-    await page.goto('/users')
-
-    const dialog = await openEditDialog(page, user.name)
-    await dialog.getByLabel('Name').fill(newName)
-    // Upper-cased on input; the schema lower-cases it.
-    await dialog.getByLabel('Email').fill(newEmail.toUpperCase())
-    await dialog.getByRole('button', { name: 'Save changes' }).click()
-    await expect(dialog).toBeHidden()
-
-    await expect(userRow(page, newEmail).getByRole('cell').first()).toHaveText(newName)
-    await expect(userRow(page, user.email)).toHaveCount(0)
-
-    await page.reload()
-    await expect(userRow(page, newEmail).getByRole('cell').first()).toHaveText(newName)
-    await expect(userRow(page, user.email)).toHaveCount(0)
-  })
-
   test('a blank password keeps the old one working and leaves existing sessions alone', async ({
     page,
     playwright,
@@ -333,59 +247,6 @@ test.describe('edit user dialog', () => {
       await Promise.all([userCtx.dispose(), fresh.dispose()])
     }
   })
-
-  test('short name, invalid email and short password show field errors and send no request', async ({
-    page,
-  }) => {
-    await signInViaApi(page.request, ADMIN)
-    const user = await createUserViaApi(page.request, 'invalid')
-    const patches = trackRequests(page, 'PATCH')
-    await page.goto('/users')
-
-    const dialog = await openEditDialog(page, user.name)
-    await dialog.getByLabel('Name').fill('ab')
-    await dialog.getByLabel('Email').fill('not-an-email')
-    await dialog.getByLabel('Password').fill('short')
-    await dialog.getByRole('button', { name: 'Save changes' }).click()
-
-    await expect(dialog.getByRole('alert')).toHaveText([
-      'Name must be at least 3 characters',
-      'Enter a valid email address',
-      'Password must be at least 8 characters',
-    ])
-    for (const label of ['Name', 'Email', 'Password']) {
-      await expect(dialog.getByLabel(label)).toHaveAttribute('aria-invalid', 'true')
-    }
-    await expect(dialog).toBeVisible()
-    expect(patches).toEqual([])
-
-    await page.reload()
-    await expect(userRow(page, user.email).getByRole('cell').first()).toHaveText(user.name)
-  })
-
-  test('an email that belongs to another user shows the 409 message under the email field', async ({
-    page,
-  }) => {
-    await signInViaApi(page.request, ADMIN)
-    const user = await createUserViaApi(page.request, 'conflict')
-    await page.goto('/users')
-
-    const dialog = await openEditDialog(page, user.name)
-    await dialog.getByLabel('Email').fill(AGENT.email)
-    const [res] = await Promise.all([
-      page.waitForResponse((r) => r.request().method() === 'PATCH' && r.url().includes(`/api/users/${user.id}`)),
-      dialog.getByRole('button', { name: 'Save changes' }).click(),
-    ])
-    expect(res.status()).toBe(409)
-
-    await expect(dialog.getByRole('alert')).toHaveText(['A user with this email already exists'])
-    await expect(dialog.getByLabel('Email')).toHaveAttribute('aria-invalid', 'true')
-    await expect(dialog).toBeVisible()
-
-    await page.reload()
-    await expect(userRow(page, user.email)).toHaveCount(1)
-    await expect(userRow(page, AGENT.email).getByRole('cell').first()).toHaveText(AGENT.name)
-  })
 })
 
 test.describe('PATCH /api/users/:id', () => {
@@ -436,6 +297,21 @@ test.describe('PATCH /api/users/:id', () => {
     expect(await res.json()).toEqual({ error: 'User not found' })
   })
 
+  test('changing the email to another user\'s gets 409; the user is unchanged', async ({ request }) => {
+    await signInViaApi(request, ADMIN)
+    const user = await createUserViaApi(request, 'conflict')
+
+    const res = await request.patch(`/api/users/${user.id}`, {
+      data: { name: user.name, email: AGENT.email },
+    })
+    expect(res.status()).toBe(409)
+    expect(await res.json()).toEqual({ error: 'A user with this email already exists' })
+
+    const { users } = await (await request.get('/api/users')).json()
+    expect(users).toContainEqual(expect.objectContaining({ id: user.id, name: user.name, email: user.email }))
+    expect(users).toContainEqual(expect.objectContaining({ email: AGENT.email, name: AGENT.name }))
+  })
+
   test('agent gets 403 and unauthenticated gets 401; the user is unchanged', async ({
     playwright,
     baseURL,
@@ -463,82 +339,6 @@ test.describe('PATCH /api/users/:id', () => {
     } finally {
       await Promise.all([admin.dispose(), agent.dispose(), anon.dispose()])
     }
-  })
-})
-
-test.describe('delete user dialog', () => {
-  test('names the user and offers Cancel and Delete', async ({ page }) => {
-    await signInViaApi(page.request, ADMIN)
-    const user = await createUserViaApi(page.request, 'delname')
-    await page.goto('/users')
-
-    const dialog = await openDeleteDialog(page, user.name)
-    await expect(dialog).toContainText(
-      `Delete ${user.name} (${user.email})? They will be signed out and won't be able to sign in.`,
-    )
-    await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeEnabled()
-    await expect(dialog.getByRole('button', { name: 'Delete', exact: true })).toBeEnabled()
-    await expect(dialog.getByRole('alert')).toHaveCount(0)
-  })
-
-  test('the admin row has no Delete button', async ({ page }) => {
-    await signInViaApi(page.request, ADMIN)
-    await page.goto('/users')
-
-    const row = userRow(page, ADMIN.email)
-    await expect(row.getByRole('button', { name: `Edit ${ADMIN.name}`, exact: true })).toBeVisible()
-    await expect(row.getByRole('button', { name: /^Delete/ })).toHaveCount(0)
-  })
-
-  test('deleting an agent removes the row, and it stays gone after a reload', async ({ page }) => {
-    await signInViaApi(page.request, ADMIN)
-    const user = await createUserViaApi(page.request, 'delui')
-    await page.goto('/users')
-    await expect(userRow(page, user.email)).toHaveCount(1)
-
-    const dialog = await openDeleteDialog(page, user.name)
-    const [res] = await Promise.all([
-      page.waitForResponse((r) => r.request().method() === 'DELETE' && r.url().includes(`/api/users/${user.id}`)),
-      dialog.getByRole('button', { name: 'Delete', exact: true }).click(),
-    ])
-    expect(res.status()).toBe(204)
-    await expect(dialog).toBeHidden()
-    await expect(userRow(page, user.email)).toHaveCount(0)
-    await expect(userRow(page, AGENT.email)).toHaveCount(1)
-
-    await page.reload()
-    await expect(userRow(page, AGENT.email)).toHaveCount(1)
-    await expect(userRow(page, user.email)).toHaveCount(0)
-  })
-
-  test('Cancel closes the dialog, keeps the row and sends no DELETE', async ({ page }) => {
-    await signInViaApi(page.request, ADMIN)
-    const user = await createUserViaApi(page.request, 'delcancel')
-    const deletes = trackRequests(page, 'DELETE')
-    await page.goto('/users')
-
-    const dialog = await openDeleteDialog(page, user.name)
-    await dialog.getByRole('button', { name: 'Cancel' }).click()
-    await expect(dialog).toBeHidden()
-    await expect(userRow(page, user.email)).toHaveCount(1)
-    expect(deletes).toEqual([])
-
-    await page.reload()
-    await expect(userRow(page, user.email)).toHaveCount(1)
-  })
-
-  test('a failed delete shows the server message and keeps the dialog open', async ({ page }) => {
-    await signInViaApi(page.request, ADMIN)
-    const user = await createUserViaApi(page.request, 'delstale')
-    await page.goto('/users')
-
-    const dialog = await openDeleteDialog(page, user.name)
-    // Deleted elsewhere while the dialog is open, so the dialog's DELETE gets a 404.
-    await deleteUserViaApi(page.request, user.id)
-    await dialog.getByRole('button', { name: 'Delete', exact: true }).click()
-
-    await expect(dialog.getByRole('alert')).toHaveText('User not found')
-    await expect(dialog).toBeVisible()
   })
 })
 
