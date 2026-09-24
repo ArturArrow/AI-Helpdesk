@@ -7,6 +7,7 @@ import { CLIENT_URL } from "./lib/env";
 import { requireAdmin } from "./middleware/requireAdmin";
 import { requireAuth } from "./middleware/requireAuth";
 import { requireWebhookSecret } from "./middleware/requireWebhookSecret";
+import { ticketsRouter } from "./routes/tickets";
 import { usersRouter } from "./routes/users";
 import { webhookRouter } from "./routes/webhook";
 
@@ -31,6 +32,9 @@ app.use(express.json());
 
 // Every /api/users route is admin-only; guarding the prefix covers routes added later.
 app.use("/api/users", requireAuth, requireAdmin, usersRouter);
+
+// Tickets are worked by agents and admins alike, so any signed-in user may read them.
+app.use("/api/tickets", requireAuth, ticketsRouter);
 
 // Called by the mail pipeline, not a signed-in user: a shared secret instead of a session.
 app.use("/api/webhooks", requireWebhookSecret, webhookRouter);
