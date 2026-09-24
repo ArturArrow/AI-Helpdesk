@@ -22,3 +22,16 @@ export const inboundEmailSchema = z.object({
 });
 
 export type InboundEmailInput = z.input<typeof inboundEmailSchema>;
+
+// Query of GET /api/tickets. The table sorts on the server; each field is a sortable column.
+export const ticketSortFields = ["subject", "senderName", "status", "category", "createdAt"] as const;
+
+export const ticketListQuerySchema = z.object({
+  sortBy: z
+    .enum(ticketSortFields, { error: `sortBy must be one of: ${ticketSortFields.join(", ")}` })
+    .default("createdAt"),
+  sortOrder: z.enum(["asc", "desc"], { error: "sortOrder must be asc or desc" }).default("desc"),
+});
+
+export type TicketSortField = (typeof ticketSortFields)[number];
+export type TicketListQuery = z.infer<typeof ticketListQuerySchema>;

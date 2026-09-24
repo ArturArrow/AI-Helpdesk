@@ -1,5 +1,8 @@
 import { Router } from "express";
+import { ticketListQuerySchema } from "core/schemas/tickets";
+import type { Prisma } from "../../generated/prisma/client";
 import { prisma } from "../lib/db";
+import { validateQuery } from "../lib/validate";
 
 export const ticketsRouter = Router();
 
@@ -14,11 +17,24 @@ const ticketListSelect = {
   createdAt: true,
 } as const;
 
-// Newest first; id breaks ties between tickets created in the same millisecond.
-ticketsRouter.get("/", async (_req, res) => {
-  const tickets = await prisma.ticket.findMany({
-    select: ticketListSelect,
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-  });
+// Sorted on the server (the client table uses manualSorting). Defaults to newest first.
+// Status and category are Postgres enums, so they sort in declaration order, not by label.
+ticketsRouter.get("/", async (req, res) => {
+  const query = validateQuery(ticketListQuerySchema, req, res);
+  if (!query) return;
+  const { sortBy, sortOrder } = query;
+
+  // Tie-breaks keep the order stable: newest first within equal values, then id.
+  const orderBy: Prisma.TicketOrderByWithRelationInput[] =
+    sortBy === "createdAt"
+      ? [{ createdAt: sortOrder }, { id: sortOrder }]
+      : [
+          // Unclassified tickets go last in both directions.
+          sortBy === "category" ? { category: { sort: sortOrder, nulls: "last" } } : { [sortBy]: sortOrder },
+          { createdAt: "desc" },
+          { id: "desc" },
+        ];
+
+  const tickets = await prisma.ticket.findMany({ select: ticketListSelect, orderBy });
   res.json({ tickets });
 });

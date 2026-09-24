@@ -34,7 +34,7 @@
 - [ ] Implement list tickets API endpoint (with filtering by status and category, sorting)
 - [ ] Implement get ticket API endpoint
 - [ ] Implement update ticket API endpoint (change status, assign agent)
-- [ ] Create ticket list page with filtering and sorting
+- [ ] Create ticket list page with filtering and sorting — list and server-side sorting done (`/tickets`, `GET /api/tickets?sortBy=&sortOrder=`); filtering still open
 - [ ] Create ticket detail page
 
 ## Phase 5: AI Features

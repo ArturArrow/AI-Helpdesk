@@ -99,7 +99,7 @@ describe('App routing', () => {
 
     expect(await screen.findByRole('heading', { name: 'Tickets', level: 1 })).toBeInTheDocument()
     expect(await screen.findByText('No tickets yet.')).toBeInTheDocument()
-    expect(get).toHaveBeenCalledWith('/api/tickets')
+    expect(get).toHaveBeenCalledWith('/api/tickets', { params: { sortBy: 'createdAt', sortOrder: 'desc' } })
     expect(screen.queryByRole('heading', { name: /Welcome/ })).not.toBeInTheDocument()
   })
 })

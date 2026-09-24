@@ -3,8 +3,8 @@
 ## Last run
 
 - **Date:** 2026-09-24
-- **Discovered (`--list`):** 78 tests in 7 files (api-auth 16, login 6, routing 5, session 7, tickets 5, users 22, webhook 17)
-- **Result:** not run since the `/tickets` page tests were removed from `tickets.spec.ts`. Before that change: 82 passed, 0 failed, 23.4s (chromium).
+- **Discovered (`--list`):** 88 tests in 7 files (api-auth 16, login 6, routing 5, session 7, tickets 15, users 22, webhook 17)
+- **Result:** 88 passed, 0 failed, 43.6s (chromium).
 
 ## tests/login.spec.ts
 
@@ -100,6 +100,19 @@ GET `/api/tickets` only. Other specs create tickets too, so these tests find the
 - A webhook ticket sent with `bodyHTML`, a `messageId` and a mixed-case email is listed with exactly `id`, `subject`, `senderName`, `senderEmail` (lower-cased), `status` `open`, `category` null and a parseable `createdAt`. Every listed ticket has exactly those seven keys (no `body`, `bodyHTML` or `messageId`).
 - Three tickets created in sequence are listed newest first, and the whole list's `createdAt` values are descending.
 
+Sorting (`sortBy`, `sortOrder` query params):
+
+- Without a session, both valid and invalid sort params get 401 `{"error":"Unauthorized"}` (auth runs before validation).
+- `sortBy=senderEmail` (a listed but unsortable column) gets 400 `{"error":"sortBy must be one of: subject, senderName, status, category, createdAt"}`.
+- `sortOrder=sideways` gets 400 `{"error":"sortOrder must be asc or desc"}`.
+- `sortBy=subject&sortOrder=asc`: three tickets created as B, C, A are listed A, B, C.
+- `sortBy=subject&sortOrder=desc`: the same setup is listed C, B, A.
+- `sortBy=senderName` with no `sortOrder` lists sender names descending (the default), and with `asc` ascending.
+- Two tickets with the same subject are listed newest first under `sortBy=subject` in both directions (the `createdAt desc` tie-break).
+- `sortBy=createdAt&sortOrder=asc` lists three tickets oldest first, and the whole list's `createdAt` values are ascending.
+- `sortBy=category` in both directions returns 200, the test's three (unclassified, `category` null) tickets are newest first.
+- `sortBy=status` in both directions returns 200.
+
 ## Harness helpers
 
 - **`fixtures/auth.ts`:**
@@ -117,7 +130,7 @@ GET `/api/tickets` only. Other specs create tickets too, so these tests find the
   - `deleteUserViaApi(request, id)` soft-deletes a user through DELETE `/api/users/:id` (signed in as the admin) and asserts 204.
   - `users.spec.ts` keeps its own `userRow`, `openNewUserDialog`, `submitNewUser`, `openEditDialog`, `openDeleteDialog` and `postSignIn`, which only it uses.
 - **`fixtures/webhook.ts`:** `inboundSecret()` reads `INBOUND_EMAIL_SECRET` from `server/.env.test` (the file `start:test` loads) with `node:util`'s `parseEnv`, so the tests and the server share one value. It reads lazily and throws a clear error if the value is missing, so other specs still load. `webhook.spec.ts` keeps its own `validEmail` (unique sender per call), `uniqueMessageId`, `postInbound`, `expectUnauthorized` and `expectCreated`.
-- **`fixtures/tickets.ts`:** `createTicketViaWebhook(request, label)` posts a unique email (subject `E2E <label> <suffix>`, unique sender) to the inbound webhook with the secret, asserts 201 and returns the ticket's `id`, `subject`, `senderName` and `senderEmail`. It needs no session.
+- **`fixtures/tickets.ts`:** `createTicketViaWebhook(request, label, overrides?)` posts a unique email (subject `E2E <label> <suffix>`, unique sender) to the inbound webhook with the secret, asserts 201 and returns the ticket's `id`, `subject`, `senderName` and `senderEmail`. `overrides` sets `subject` or `senderName` exactly, for the sorting tests. It needs no session. `tickets.spec.ts` keeps its own `listTickets(request, params)` (GET with sort params, asserts 200) and `expectInOrder(tickets, ids)` (the ids are listed in that relative order).
 - Helpers are plain exported functions: no page objects and no `test.extend` fixtures.
 - **`global-setup.ts`:** runs the test-DB guard, `prisma migrate reset --force`, the admin seed, then `seed-agent.ts`. Each run starts with two users: the admin and the agent.
 - **`seed-agent.ts`:** creates the agent through Better Auth's `internalAdapter`, like `prisma/seed.ts` creates the admin. It reads the credentials from `E2E_AGENT_*` environment variables and skips if the agent already exists.
@@ -139,6 +152,8 @@ GET `/api/tickets` only. Other specs create tickets too, so these tests find the
 - **The "Deleting…" pending state:** not tested; it would need holding the DELETE request.
 - **Stored webhook tickets, beyond the list fields:** GET `/api/tickets` now shows subject, sender, status and category (checked in `tickets.spec.ts`), but not `body`, `bodyHTML`, `messageId` or `assignedToId`, so those can't be checked as stored. `webhook.spec.ts` still checks only responses: that a missing or blank subject is listed as `"(no subject)"`, that a dedupe adds no second row, and that a 400 creates nothing could now be checked through the list but haven't been added.
 - **The `/tickets` page UI:** the table's headers, rows and order, the category label, the empty, loading and error states, and the Tickets navbar link are covered by the Vitest component tests (`client/src/pages/TicketsPage.test.tsx`, `client/src/components/Navbar.test.tsx`), not E2E. The client redirect of an unauthenticated `/tickets` visit and the navbar link navigating there are covered in `client/src/App.test.tsx`; the server side is covered by the GET `/api/tickets` 401. E2E keeps the API tests, which need the real server and database.
+- **Sort order of status and category values:** the webhook creates only `open`, unclassified tickets and no endpoint changes status or category, so the enum declaration order (open < resolved < closed; general_question < technical_question < refund_request) and nulls-last for category can't be observed. Only the 200 and the newest-first tie-break are checked. Covering them needs ticket update endpoints (or classification) to exist.
+- **Collation-sensitive subject order:** the sorting tests use subjects that differ only in a final capital letter, so they pass under any Postgres collation; mixed case, accents and punctuation aren't tested.
 - **The P2002 fallback specifically:** the concurrent test fires two posts at once and checks the outcome (one 201, one 200, same id), but can't force which path answers the 200, the `findUnique` lookup or the unique-constraint catch.
 - **Not built yet:** restoring a deleted user, ticket CRUD beyond webhook creation and the list (detail, update, assignment), AI features, email, and the dashboard.
 
@@ -148,4 +163,5 @@ GET `/api/tickets` only. Other specs create tickets too, so these tests find the
 - **A deleted user's email stays reserved:** POST and PATCH still see soft-deleted users, so the email can't be reused (409), and nothing in the UI shows why. `users.spec.ts` records this.
 - **Webhook storage is only partly observable:** GET `/api/tickets` exposes the list fields; the body fields need a ticket detail endpoint (planned with ticket CRUD).
 - **The ticket list is unpaginated:** GET `/api/tickets` returns every ticket. `tickets.spec.ts` looks tickets up in the full list, so adding pagination will need those tests updated.
+- **Subject and sender sorting follow the database collation:** the order of mixed-case or accented values depends on `helpdesk_test`'s collation, which may differ from production's. Not asserted.
 - **App changes needed:** none to run the current suite. Every locator uses an accessible label, role or text.

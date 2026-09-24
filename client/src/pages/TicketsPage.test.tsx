@@ -1,4 +1,5 @@
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import axios, { AxiosError } from 'axios'
 import { TicketCategory } from 'core/constants/ticketCategory'
 import { TicketStatus } from 'core/constants/ticketStatus'
@@ -82,7 +83,7 @@ describe('TicketsPage', () => {
     renderWithQuery(<TicketsPage />)
 
     expect(await screen.findByRole('cell', { name: 'Refund for order 1234' })).toBeInTheDocument()
-    expect(get).toHaveBeenCalledWith('/api/tickets')
+    expect(get).toHaveBeenCalledWith('/api/tickets', { params: { sortBy: 'createdAt', sortOrder: 'desc' } })
 
     const table = screen.getByRole('table')
     expect(table).toHaveAttribute('aria-busy', 'false')
@@ -159,5 +160,114 @@ describe('TicketsPage', () => {
     renderWithQuery(<TicketsPage />)
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/^Couldn't load tickets: Request failed$/)
+  })
+
+  describe('sorting', () => {
+    function subjects() {
+      const [, ...bodyRows] = within(screen.getByRole('table')).getAllByRole('row')
+      return bodyRows.map((row) => within(row).getAllByRole('cell')[0]!.textContent)
+    }
+
+    function ariaSorts() {
+      return screen.getAllByRole('columnheader').map((th) => th.getAttribute('aria-sort'))
+    }
+
+    it('requests newest first and marks Created as sorted descending', async () => {
+      const get = mockGet().mockResolvedValue({ data: { tickets } })
+      renderWithQuery(<TicketsPage />)
+      await screen.findByRole('cell', { name: 'Refund for order 1234' })
+
+      expect(get).toHaveBeenCalledTimes(1)
+      expect(get).toHaveBeenCalledWith('/api/tickets', { params: { sortBy: 'createdAt', sortOrder: 'desc' } })
+      expect(screen.getByRole('columnheader', { name: 'Created' })).toHaveAttribute('aria-sort', 'descending')
+      expect(ariaSorts()).toEqual(['none', 'none', 'none', 'none', 'descending'])
+    })
+
+    it('sorts by Subject ascending on the first click and descending on the second', async () => {
+      const user = userEvent.setup()
+      const get = mockGet().mockResolvedValue({ data: { tickets } })
+      renderWithQuery(<TicketsPage />)
+      await screen.findByRole('cell', { name: 'Refund for order 1234' })
+
+      await user.click(screen.getByRole('button', { name: 'Subject' }))
+      await waitFor(() =>
+        expect(get).toHaveBeenLastCalledWith('/api/tickets', { params: { sortBy: 'subject', sortOrder: 'asc' } }),
+      )
+      expect(ariaSorts()).toEqual(['ascending', 'none', 'none', 'none', 'none'])
+
+      await user.click(screen.getByRole('button', { name: 'Subject' }))
+      await waitFor(() =>
+        expect(get).toHaveBeenLastCalledWith('/api/tickets', { params: { sortBy: 'subject', sortOrder: 'desc' } }),
+      )
+      expect(ariaSorts()).toEqual(['descending', 'none', 'none', 'none', 'none'])
+    })
+
+    it('sorts the From column by senderName', async () => {
+      const user = userEvent.setup()
+      const get = mockGet().mockResolvedValue({ data: { tickets } })
+      renderWithQuery(<TicketsPage />)
+      await screen.findByRole('cell', { name: 'Refund for order 1234' })
+
+      await user.click(screen.getByRole('button', { name: 'From' }))
+
+      await waitFor(() =>
+        expect(get).toHaveBeenLastCalledWith('/api/tickets', { params: { sortBy: 'senderName', sortOrder: 'asc' } }),
+      )
+      expect(screen.getByRole('columnheader', { name: 'From' })).toHaveAttribute('aria-sort', 'ascending')
+    })
+
+    it('sorts Created newest first when switching to it from another column', async () => {
+      const user = userEvent.setup()
+      const get = mockGet().mockResolvedValue({ data: { tickets } })
+      renderWithQuery(<TicketsPage />)
+      await screen.findByRole('cell', { name: 'Refund for order 1234' })
+
+      await user.click(screen.getByRole('button', { name: 'Status' }))
+      await waitFor(() =>
+        expect(get).toHaveBeenLastCalledWith('/api/tickets', { params: { sortBy: 'status', sortOrder: 'asc' } }),
+      )
+
+      await user.click(screen.getByRole('button', { name: 'Created' }))
+      await waitFor(() =>
+        expect(get).toHaveBeenLastCalledWith('/api/tickets', { params: { sortBy: 'createdAt', sortOrder: 'desc' } }),
+      )
+      expect(get).toHaveBeenCalledTimes(3)
+      expect(ariaSorts()).toEqual(['none', 'none', 'none', 'none', 'descending'])
+    })
+
+    it('renders the rows in the order the server returns for the new sort', async () => {
+      const user = userEvent.setup()
+      const bySubject = [tickets[1]!, tickets[2]!, tickets[0]!, tickets[3]!]
+      mockGet()
+        .mockResolvedValueOnce({ data: { tickets } })
+        .mockResolvedValueOnce({ data: { tickets: bySubject } })
+      renderWithQuery(<TicketsPage />)
+      await screen.findByRole('cell', { name: 'Refund for order 1234' })
+      expect(subjects()).toEqual(['Refund for order 1234', 'App crashes on start', 'Opening hours?', 'Something odd'])
+
+      await user.click(screen.getByRole('button', { name: 'Subject' }))
+
+      await waitFor(() =>
+        expect(subjects()).toEqual(['App crashes on start', 'Opening hours?', 'Refund for order 1234', 'Something odd']),
+      )
+      expect(screen.getByRole('table')).toHaveAttribute('aria-busy', 'false')
+    })
+
+    it('keeps the previous rows visible and marks the table busy while a re-sort loads', async () => {
+      const user = userEvent.setup()
+      const get = mockGet()
+        .mockResolvedValueOnce({ data: { tickets } })
+        .mockReturnValueOnce(new Promise(() => {}))
+      renderWithQuery(<TicketsPage />)
+      await screen.findByRole('cell', { name: 'Refund for order 1234' })
+      expect(screen.getByRole('table')).toHaveAttribute('aria-busy', 'false')
+
+      await user.click(screen.getByRole('button', { name: 'Subject' }))
+
+      await waitFor(() => expect(screen.getByRole('table')).toHaveAttribute('aria-busy', 'true'))
+      expect(get).toHaveBeenLastCalledWith('/api/tickets', { params: { sortBy: 'subject', sortOrder: 'asc' } })
+      expect(subjects()).toEqual(['Refund for order 1234', 'App crashes on start', 'Opening hours?', 'Something odd'])
+      expect(screen.getByRole('columnheader', { name: 'Subject' })).toHaveAttribute('aria-sort', 'ascending')
+    })
   })
 })
