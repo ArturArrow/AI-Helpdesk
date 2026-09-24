@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 import { ADMIN, AGENT, ORIGIN, signInViaApi, submitLoginForm } from '../fixtures/auth.js'
 import { createUserViaApi, deleteUserViaApi, uniqueSuffix } from '../fixtures/users.js'
 
@@ -8,6 +8,27 @@ function userRow(page: Page, email: string) {
     .getByRole('table')
     .getByRole('row')
     .filter({ has: page.getByRole('cell', { name: email, exact: true }) })
+}
+
+// Clicks "New user" above the table and returns the dialog it opens.
+async function openNewUserDialog(page: Page) {
+  await page.getByRole('button', { name: 'New user', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('heading', { name: 'New user' })).toBeVisible()
+  await expect(dialog.getByText('Create an agent account.')).toBeVisible()
+  return dialog
+}
+
+// Fills the New user dialog and submits it; returns the POST /api/users response.
+async function submitNewUser(page: Page, dialog: Locator, user: { name: string; email: string; password: string }) {
+  await dialog.getByLabel('Name').fill(user.name)
+  await dialog.getByLabel('Email').fill(user.email)
+  await dialog.getByLabel('Password').fill(user.password)
+  const [res] = await Promise.all([
+    page.waitForResponse((r) => r.request().method() === 'POST' && r.url().endsWith('/api/users')),
+    dialog.getByRole('button', { name: 'Create user' }).click(),
+  ])
+  return res
 }
 
 // Clicks the row's "Edit <name>" button and returns the dialog it opens.
@@ -110,6 +131,105 @@ test.describe('/users page', () => {
 
     await expect(page.getByRole('alert')).toHaveText("Couldn't load users: Request failed (500)")
     await expect(page.getByRole('table')).toHaveCount(0)
+  })
+})
+
+test.describe('new user dialog', () => {
+  test('admin creates an agent; the row appears, survives a reload, and the user can sign in', async ({
+    page,
+    playwright,
+    baseURL,
+  }) => {
+    await signInViaApi(page.request, ADMIN)
+    const suffix = uniqueSuffix()
+    const user = { name: `Created ${suffix}`, email: `created-${suffix}@example.com`, password: `pw-${suffix}` }
+    await page.goto('/users')
+
+    const dialog = await openNewUserDialog(page)
+    // Upper-cased on input; the schema lower-cases it.
+    const res = await submitNewUser(page, dialog, { ...user, email: user.email.toUpperCase() })
+    expect(res.status()).toBe(201)
+    await expect(dialog).toBeHidden()
+
+    await expect(userRow(page, user.email).getByRole('cell')).toHaveText([user.name, user.email, 'agent', /\d/, ''])
+    await page.reload()
+    await expect(userRow(page, user.email).getByRole('cell')).toHaveText([user.name, user.email, 'agent', /\d/, ''])
+
+    const userCtx = await playwright.request.newContext({ baseURL })
+    try {
+      await signInViaApi(userCtx, user)
+      const me = await userCtx.get('/api/me')
+      expect(me.status()).toBe(200)
+      expect((await me.json()).user).toMatchObject({ name: user.name, email: user.email, role: 'agent' })
+    } finally {
+      await userCtx.dispose()
+    }
+  })
+
+  test('full lifecycle: create, see in the list, edit, delete', async ({ page }) => {
+    await signInViaApi(page.request, ADMIN)
+    const suffix = uniqueSuffix()
+    const user = { name: `Lifecycle ${suffix}`, email: `lifecycle-${suffix}@example.com`, password: `pw-${suffix}` }
+    const edited = { name: `Lifecycle edited ${suffix}`, email: `lifecycle-edited-${suffix}@example.com` }
+    await page.goto('/users')
+
+    // Create
+    const createDialog = await openNewUserDialog(page)
+    const created = await submitNewUser(page, createDialog, user)
+    expect(created.status()).toBe(201)
+    const { user: { id } } = await created.json()
+    await expect(createDialog).toBeHidden()
+
+    // Read
+    await expect(userRow(page, user.email).getByRole('cell')).toHaveText([user.name, user.email, 'agent', /\d/, ''])
+
+    // Update
+    const editDialog = await openEditDialog(page, user.name)
+    await editDialog.getByLabel('Name').fill(edited.name)
+    await editDialog.getByLabel('Email').fill(edited.email)
+    await editDialog.getByRole('button', { name: 'Save changes' }).click()
+    await expect(editDialog).toBeHidden()
+    await expect(userRow(page, edited.email).getByRole('cell')).toHaveText([edited.name, edited.email, 'agent', /\d/, ''])
+    await expect(userRow(page, user.email)).toHaveCount(0)
+
+    // Delete
+    const deleteDialog = await openDeleteDialog(page, edited.name)
+    await expect(deleteDialog).toContainText(`Delete ${edited.name} (${edited.email})?`)
+    await deleteDialog.getByRole('button', { name: 'Delete', exact: true }).click()
+    await expect(deleteDialog).toBeHidden()
+    await expect(userRow(page, edited.email)).toHaveCount(0)
+
+    await page.reload()
+    await expect(userRow(page, AGENT.email)).toHaveCount(1)
+    await expect(userRow(page, edited.email)).toHaveCount(0)
+    await expect(userRow(page, user.email)).toHaveCount(0)
+
+    const { users } = await (await page.request.get('/api/users')).json()
+    expect(users.map((u: { id: string }) => u.id)).not.toContain(id)
+  })
+})
+
+test.describe('POST /api/users', () => {
+  test('admin gets 201 with the new agent, and it appears in GET /api/users', async ({ request }) => {
+    await signInViaApi(request, ADMIN)
+    const suffix = uniqueSuffix()
+
+    const res = await request.post('/api/users', {
+      data: { name: `  Api created ${suffix}  `, email: `API-CREATED-${suffix}@EXAMPLE.COM`, password: `pw-${suffix}` },
+    })
+    expect(res.status()).toBe(201)
+    const { user } = await res.json()
+    expect(Object.keys(user).sort()).toEqual(['createdAt', 'email', 'id', 'name', 'role'])
+    expect(user).toMatchObject({
+      name: `Api created ${suffix}`,
+      email: `api-created-${suffix}@example.com`,
+      role: 'agent',
+    })
+    expect(typeof user.id).toBe('string')
+    expect(Number.isNaN(Date.parse(user.createdAt))).toBe(false)
+
+    const { users } = await (await request.get('/api/users')).json()
+    expect(users).toContainEqual(user)
   })
 })
 

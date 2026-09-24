@@ -2,10 +2,10 @@
 
 ## Last run
 
-- **Date:** 2026-09-23
-- **Discovered (`--list`):** 82 tests in 5 files
-- **Result:** 82 passed, 0 failed, 37.4s (chromium, 1 worker), after replacing role string literals with the `Role` enum (`core/roles` on the client, the Prisma enum on the server).
-- **Previous result, from before this change:** 67 passed, 0 failed, 24.5s (chromium, 1 worker).
+- **Date:** 2026-09-24
+- **Discovered (`--list`):** 85 tests in 5 files
+- **Result:** 85 passed, 0 failed, 41.9s (chromium, 1 worker), after adding the create-user tests (New user dialog, full UI lifecycle, POST `/api/users`).
+- **Previous result, from before this change:** 82 passed, 0 failed, 37.4s (chromium, 1 worker).
 
 ## tests/login.spec.ts
 
@@ -64,6 +64,9 @@
 - `/api/users` is ordered by `createdAt` ascending.
 - The admin on `/users` sees a table with the column headers Name, Email, Role, Created and Actions (screen-reader only), and one row each for the admin and the agent, with name, email, role, a date and an `Edit <name>` button. The agent row has a `Delete <name>` button and the admin row doesn't. No alert is shown.
 - When `/api/users` is intercepted with a 500, the page shows the alert "Couldn't load users: Request failed (500)" and no table.
+- New user dialog: opens from "New user" with the "Create an agent account." hint. Name, an upper-cased email and a password submit with 201, the dialog closes, and the row shows the name, lower-cased email, role `agent` and a date, also after a reload. The new user signs in through the API and `/api/me` returns 200 with their name, email and role `agent`.
+- Full lifecycle through the UI: create in the New user dialog, see the row, rename and change the email in the Edit dialog, delete in the Delete dialog. After a reload neither email is listed, the agent's row remains, and the created id is gone from GET `/api/users`.
+- Admin POST `/api/users` returns 201 with exactly `id`, `name`, `email`, `role`, `createdAt`, the name trimmed, the email lower-cased and role `agent`. GET `/api/users` then lists the same user.
 - Edit dialog: opens from `Edit <name>` titled "Edit user", with the blank-password hint, the row's name and email, and an empty password.
 - Edit dialog: changing name and (upper-cased) email closes the dialog, the row shows the new name and lower-cased email, the old email is gone, and both hold after a reload.
 - Edit dialog: saving with a blank password keeps the old password working, and the user's existing session still gets 200 from `/api/me`.
@@ -105,7 +108,7 @@
   - `uniqueSuffix()` returns a timestamp plus a random tag, for names and emails that don't collide across tests or re-runs.
   - `createUserViaApi(request, label)` creates an agent through POST `/api/users` (the request must be signed in as the admin), asserts 201 and returns its credentials and `id`. Tests that mutate or delete users create their own, so the seeded admin and agent never change.
   - `deleteUserViaApi(request, id)` soft-deletes a user through DELETE `/api/users/:id` (signed in as the admin) and asserts 204.
-  - `users.spec.ts` keeps its own `userRow`, `openEditDialog`, `openDeleteDialog`, `trackRequests` and `postSignIn`, which only it uses.
+  - `users.spec.ts` keeps its own `userRow`, `openNewUserDialog`, `submitNewUser`, `openEditDialog`, `openDeleteDialog`, `trackRequests` and `postSignIn`, which only it uses.
 - Helpers are plain exported functions: no page objects and no `test.extend` fixtures. `login.spec.ts` keeps its own `trackSignInRequests`, which only the validation tests use.
 - **`global-setup.ts`:** runs the test-DB guard, `prisma migrate reset --force`, the admin seed, then `seed-agent.ts`. Each run starts with two users: the admin and the agent.
 - **`seed-agent.ts`:** creates the agent through Better Auth's `internalAdapter`, like `prisma/seed.ts` creates the admin. It reads the credentials from `E2E_AGENT_*` environment variables and skips if the agent already exists.
@@ -119,7 +122,7 @@
 - **Origin/CSRF checks:** Better Auth sets `skipOriginCheck` to `true` when `isTest()`, which also skips CSRF. Testing them needs a server configured to keep those checks on.
 - **A role demotion taking effect on the next request:** needs a direct DB role change; PATCH `/api/users/:id` doesn't change roles.
 - **The loading skeleton and "No users yet." states on `/users`:** not tested. The empty state can't happen with the seeded users, and holding the request only to see the loading skeleton adds little.
-- **The "New user" dialog and POST `/api/users` behaviour:** built, but no E2E tests yet beyond the guard row and its use as a setup step in `createUserViaApi`. Not requested in this round.
+- **Create-user error paths:** the New user dialog's field errors, the 409 on a taken email, the "Creating…" pending state, and POST `/api/users` 400s are not tested; only happy paths were requested. The guard (401/403) and the 409 for a deleted user's email are covered.
 - **Editing a user's role:** PATCH accepts only name, email and password, so there is nothing to test.
 - **Deleting an admin through the UI:** admin rows have no delete button, so it's covered only at the API (403).
 - **The "Deleting…" pending state:** not tested; it would need holding the DELETE request.
