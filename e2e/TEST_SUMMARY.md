@@ -3,8 +3,8 @@
 ## Last run
 
 - **Date:** 2026-09-24
-- **Discovered (`--list`):** 62 tests in 6 files (api-auth 16, login 6, routing 5, session 7, users 22, webhook 6)
-- **Result:** 62 passed, 0 failed, 20.1s (chromium, 1 worker).
+- **Discovered (`--list`):** 73 tests in 6 files (api-auth 16, login 6, routing 5, session 7, users 22, webhook 17)
+- **Result:** 73 passed, 0 failed, 19.9s (chromium).
 
 ## tests/login.spec.ts
 
@@ -73,12 +73,22 @@
 
 ## tests/webhook.spec.ts
 
-- POST `/api/webhooks/inbound-email` with no `X-Inbound-Secret` header, and with a wrong one, gets 401 `{"error":"Unauthorized"}`.
-- A signed-in admin's cookie with a valid body but no secret gets 401: a session doesn't count.
-- Invalid bodies get 400 with the first validation message: missing senderEmail, invalid senderEmail, missing or blank senderName, missing or blank body. Malformed JSON gets a JSON 400.
-- A valid email (with bodyHTML and a unique messageId) gets 201 `{"ticket":{"id":<number>}}`.
-- The same messageId posted twice gets 201, then 200 with the same id.
-- Two posts without a messageId get 201 each, with distinct ids.
+POST `/api/webhooks/inbound-email`. The route returns only `{"ticket":{"id":<number>}}`, so these tests check the response, not the stored row.
+
+- No `X-Inbound-Secret` header gets 401 `{"error":"Unauthorized"}`.
+- A wrong secret gets 401 `{"error":"Unauthorized"}`.
+- A wrong secret of the same length (last character changed) gets 401, so the `timingSafeEqual` path is exercised, not just the length check.
+- A signed-in admin (session checked valid at `/api/me`) without the secret gets 401: a session doesn't count.
+- A valid email gets 201 `{"ticket":{"id":<number>}}`.
+- An email without a subject gets 201.
+- An email with a blank subject gets 201.
+- An email with `bodyHTML` and a `messageId` gets 201.
+- The same `messageId` posted twice gets 201, then 200 with the same id.
+- Two concurrent posts with the same new `messageId` get one 201 and one 200, with the same id.
+- Two identical posts without a `messageId` get 201 each, with distinct ids.
+- 400 with the schema message for: missing senderEmail, invalid senderEmail, missing senderName, missing body (one test each).
+- Malformed JSON gets a JSON 400 with no HTML and no stack frames.
+- A body over 100 kB gets 413 with a JSON `{"error":...}`.
 
 ## Harness helpers
 
@@ -96,7 +106,7 @@
   - `createUserViaApi(request, label)` creates an agent through POST `/api/users` (the request must be signed in as the admin), asserts 201 and returns its credentials and `id`. Tests that mutate or delete users create their own, so the seeded admin and agent never change.
   - `deleteUserViaApi(request, id)` soft-deletes a user through DELETE `/api/users/:id` (signed in as the admin) and asserts 204.
   - `users.spec.ts` keeps its own `userRow`, `openNewUserDialog`, `submitNewUser`, `openEditDialog`, `openDeleteDialog` and `postSignIn`, which only it uses.
-- **`fixtures/webhook.ts`:** `inboundSecret()` reads `INBOUND_EMAIL_SECRET` from `server/.env.test` (the file `start:test` loads) with `node:util`'s `parseEnv`, so the tests and the server share one value. It reads lazily and throws a clear error if the value is missing, so other specs still load. `webhook.spec.ts` keeps its own `postInbound`.
+- **`fixtures/webhook.ts`:** `inboundSecret()` reads `INBOUND_EMAIL_SECRET` from `server/.env.test` (the file `start:test` loads) with `node:util`'s `parseEnv`, so the tests and the server share one value. It reads lazily and throws a clear error if the value is missing, so other specs still load. `webhook.spec.ts` keeps its own `validEmail` (unique sender per call), `uniqueMessageId`, `postInbound`, `expectUnauthorized` and `expectCreated`.
 - Helpers are plain exported functions: no page objects and no `test.extend` fixtures.
 - **`global-setup.ts`:** runs the test-DB guard, `prisma migrate reset --force`, the admin seed, then `seed-agent.ts`. Each run starts with two users: the admin and the agent.
 - **`seed-agent.ts`:** creates the agent through Better Auth's `internalAdapter`, like `prisma/seed.ts` creates the admin. It reads the credentials from `E2E_AGENT_*` environment variables and skips if the agent already exists.
@@ -116,12 +126,13 @@
 - **Editing a user's role:** PATCH accepts only name, email and password, so there is nothing to test.
 - **Deleting an admin through the UI:** admin rows have no delete button, so it's covered only at the API (403).
 - **The "Deleting…" pending state:** not tested; it would need holding the DELETE request.
-- **Webhook side effects beyond the response:** the stored ticket's fields (lower-cased senderEmail, "(no subject)" default, status `open`) and that a 400 creates nothing aren't checked, because there is no endpoint to read tickets yet. The concurrent-redelivery race (P2002 fallback) isn't tested; it needs two truly simultaneous requests.
+- **Stored webhook tickets:** the response carries only the id and there is no endpoint to read tickets, so the tests can't check that a ticket is `open` with `category` and `assignedToId` null, that sender fields, body, `bodyHTML` and `messageId` are stored as sent (and senderEmail lower-cased), that a missing or blank subject becomes `"(no subject)"`, that a dedupe creates no second row, or that a 400 creates nothing.
+- **The P2002 fallback specifically:** the concurrent test fires two posts at once and checks the outcome (one 201, one 200, same id), but can't force which path answers the 200, the `findUnique` lookup or the unique-constraint catch.
 - **Not built yet:** restoring a deleted user, ticket CRUD (beyond webhook creation), AI features, email, and the dashboard.
 
 ## Open questions
 
 - **No return-to after login:** a user bounced from a deep link (e.g. `/users`) lands on `/` after signing in, not on the page they asked for. `routing.spec.ts` records this behaviour. If a return-to redirect is added, that test needs updating.
 - **A deleted user's email stays reserved:** POST and PATCH still see soft-deleted users, so the email can't be reused (409), and nothing in the UI shows why. `users.spec.ts` records this.
-- **Webhook normalization is unobservable:** a GET ticket endpoint would let `webhook.spec.ts` assert the stored subject default and lower-cased email.
-- **App changes needed:** none. Every locator uses an accessible label, role or text.
+- **Webhook storage is unobservable:** to test it, the route would need to return the full ticket (e.g. drop or widen the `select: { id: true }` in `server/src/routes/webhook.ts`), or a GET ticket endpoint would need to exist (planned with ticket CRUD). The webhook tests then need extending.
+- **App changes needed:** none to run the current suite. Every locator uses an accessible label, role or text. The webhook storage checks above need one of the app changes listed.
