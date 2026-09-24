@@ -1,6 +1,6 @@
 import { screen } from '@testing-library/react'
 import axios from 'axios'
-import { Role } from 'core/roles'
+import { Role } from 'core/constants/role'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderWithRouter } from '@/test/render.tsx'
 import { mockSession } from '@/test/session.ts'

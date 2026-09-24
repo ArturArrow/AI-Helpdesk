@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import axios from 'axios'
-import { Role } from 'core/roles'
+import { Role } from 'core/constants/role'
 import DeleteUserDialog from '@/components/DeleteUserDialog.tsx'
 import UserForm from '@/components/UserForm.tsx'
 import { Skeleton } from '@/components/ui/skeleton.tsx'

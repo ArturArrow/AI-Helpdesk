@@ -1,4 +1,4 @@
-import { Role } from 'core/roles'
+import { Role } from 'core/constants/role'
 import { Navigate, Outlet } from 'react-router'
 import { authClient } from '../lib/auth-client.ts'
 

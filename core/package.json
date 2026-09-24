@@ -4,7 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "exports": {
-    "./roles": "./src/roles.ts",
+    "./constants/role": "./src/constants/role.ts",
+    "./constants/ticketCategory": "./src/constants/ticketCategory.ts",
+    "./constants/ticketStatus": "./src/constants/ticketStatus.ts",
+    "./schemas/tickets": "./src/schemas/tickets.ts",
     "./schemas/users": "./src/schemas/users.ts"
   },
   "dependencies": {

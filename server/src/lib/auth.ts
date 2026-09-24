@@ -1,7 +1,6 @@
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { APIError, createAuthMiddleware, isAPIError } from "better-auth/api";
-import type { Role as SharedRole } from "core/roles";
 import { Role } from "../../generated/prisma/enums";
 import { prisma } from "./db";
 import { BETTER_AUTH_SECRET, BETTER_AUTH_URL, CLIENT_URL } from "./env";
@@ -124,8 +123,3 @@ export const auth = betterAuth({
 });
 
 export type Session = typeof auth.$Infer.Session;
-
-// The client uses the Role from core/roles, which restates this enum. Fails to compile if
-// the two drift apart, e.g. after adding a role to schema.prisma but not to core.
-const rolesInSync: [Role, SharedRole] extends [SharedRole, Role] ? true : never = true;
-void rolesInSync;

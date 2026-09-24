@@ -29,6 +29,7 @@
 
 ## Phase 4: Ticket CRUD
 
+- [x] `Ticket` model (`schema.prisma`: status/category enums, `assignedToId`) — added with the inbound webhook below
 - [ ] Implement create ticket API endpoint
 - [ ] Implement list tickets API endpoint (with filtering by status and category, sorting)
 - [ ] Implement get ticket API endpoint
@@ -48,7 +49,7 @@
 ## Phase 6: Email Integration
 
 - [ ] Set up email provider (SendGrid/Mailgun)
-- [ ] Implement inbound email webhook to create tickets
+- [x] Implement inbound email webhook to create tickets — `POST /api/webhooks/inbound-email`, provider-neutral JSON behind `X-Inbound-Secret`; no provider adapter yet
 - [ ] Implement outbound email sending when an agent replies
 - [ ] Handle email threading (replies linked to existing tickets)
 

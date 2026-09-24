@@ -11,3 +11,5 @@ function required(name: string): string {
 export const BETTER_AUTH_SECRET = required("BETTER_AUTH_SECRET");
 export const BETTER_AUTH_URL = required("BETTER_AUTH_URL");
 export const CLIENT_URL = required("CLIENT_URL");
+// Shared secret the mail pipeline sends in X-Inbound-Secret (see middleware/requireWebhookSecret.ts).
+export const INBOUND_EMAIL_SECRET = required("INBOUND_EMAIL_SECRET");

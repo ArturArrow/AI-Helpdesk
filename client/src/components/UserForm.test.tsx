@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent, { type UserEvent } from '@testing-library/user-event'
 import axios, { AxiosError } from 'axios'
-import { Role } from 'core/roles'
+import { Role } from 'core/constants/role'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { httpError } from '@/test/http.ts'
 import { renderWithQuery } from '@/test/render.tsx'

@@ -1,34 +1,19 @@
-import { Router, type Request, type Response } from "express";
+import { Router } from "express";
 import { createUserSchema, updateUserSchema } from "core/schemas/users";
 import { auth } from "../lib/auth";
 import { Role } from "../../generated/prisma/enums";
 import { prisma } from "../lib/db";
+import { validate } from "../lib/validate";
 
 export const usersRouter = Router();
 
 // Explicit select, so columns added to User later aren't exposed by default.
 const userSelect = { id: true, name: true, email: true, role: true, createdAt: true } as const;
 
-type Schema<T> = {
-  safeParse(data: unknown):
-    | { success: true; data: T }
-    | { success: false; error: { issues: { message: string }[] } };
-};
-
 // Soft-deleted users count as missing everywhere except the email uniqueness checks,
 // which still see them, so a deleted user's email stays reserved.
 function findActiveUser(id: string) {
   return prisma.user.findUnique({ where: { id, deletedAt: null }, select: { role: true } });
-}
-
-// Parses the body, or replies 400 with the first issue and returns undefined.
-function validate<T>(schema: Schema<T>, req: Request, res: Response) {
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.issues[0]!.message });
-    return;
-  }
-  return parsed.data;
 }
 
 usersRouter.get("/", async (_req, res) => {

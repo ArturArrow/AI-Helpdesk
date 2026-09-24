@@ -6,7 +6,9 @@ import { prisma } from "./lib/db";
 import { CLIENT_URL } from "./lib/env";
 import { requireAdmin } from "./middleware/requireAdmin";
 import { requireAuth } from "./middleware/requireAuth";
+import { requireWebhookSecret } from "./middleware/requireWebhookSecret";
 import { usersRouter } from "./routes/users";
+import { webhookRouter } from "./routes/webhook";
 
 const app = express();
 const port = process.env.PORT ?? 3001;
@@ -29,6 +31,9 @@ app.use(express.json());
 
 // Every /api/users route is admin-only; guarding the prefix covers routes added later.
 app.use("/api/users", requireAuth, requireAdmin, usersRouter);
+
+// Called by the mail pipeline, not a signed-in user: a shared secret instead of a session.
+app.use("/api/webhooks", requireWebhookSecret, webhookRouter);
 
 app.get("/api/me", requireAuth, (req, res) => {
   res.json({ user: req.user });

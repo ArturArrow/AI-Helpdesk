@@ -83,3 +83,39 @@ model Verification {
   @@index([identifier])
   @@map("verification")
 }
+
+enum TicketStatus {
+  open
+  resolved
+  closed
+}
+
+enum TicketCategory {
+  general_question
+  technical_question
+  refund_request
+}
+
+model Ticket {
+  id           Int             @id @default(autoincrement())
+  subject      String
+  // Plain-text version of the email.
+  body         String
+  // HTML version of the email, when the sender included one.
+  bodyHTML     String?
+  senderEmail  String
+  senderName   String
+  // The email's Message-ID: dedupes redelivered webhooks, later used for threading replies.
+  messageId    String?         @unique
+  status       TicketStatus    @default(open)
+  // Null until the ticket is classified.
+  category     TicketCategory?
+  // User.id of the assigned agent. A plain column, deliberately without a Prisma relation.
+  assignedToId String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@index([status])
+  @@index([assignedToId])
+  @@map("ticket")
+}

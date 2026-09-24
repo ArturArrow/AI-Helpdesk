@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
+    "typecheck": "tsc --noEmit",
     "start:test": "bun --env-file=.env.test run src/index.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",

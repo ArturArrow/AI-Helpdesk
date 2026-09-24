@@ -1,4 +1,4 @@
-import type { Role } from 'core/roles'
+import type { Role } from 'core/constants/role'
 import { vi } from 'vitest'
 import { authClient } from '@/lib/auth-client.ts'
 
