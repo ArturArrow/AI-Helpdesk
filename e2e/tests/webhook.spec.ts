@@ -3,8 +3,8 @@ import { ADMIN, signInViaApi } from '../fixtures/auth.js'
 import { uniqueSuffix } from '../fixtures/users.js'
 import { inboundSecret } from '../fixtures/webhook.js'
 
-// The route answers with `{ ticket: { id } }` only, and there is no endpoint to read tickets
-// back yet, so these tests check the wire response, not the stored row.
+// The route answers with `{ ticket: { id } }` only, so these tests check the wire response.
+// The stored list fields are checked through GET /api/tickets in tickets.spec.ts.
 
 const ENDPOINT = '/api/webhooks/inbound-email'
 

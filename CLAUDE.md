@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Early-stage, through the auth phase and starting on user management. PostgreSQL + Prisma are wired up (`server/prisma/schema.prisma`, three migrations, an idempotent admin `seed.ts`), and Better Auth provides session auth with a `role` field on users (`server/src/lib/auth.ts`, `requireAuth` / `requireAdmin` middleware). The client has routing, a protected layout, a login form built on shadcn, and an admin-gated `/users` page that lists users from `GET /api/users` and creates, edits and soft-deletes them in dialogs (`server/src/routes/users.ts`). `UsersPage` and `UserForm` have Vitest + React Testing Library component tests (`bun run --filter client test`). Playwright runs against a separate `helpdesk_test` database, with 73 passing E2E tests covering auth (login, sessions, logout, route gating, the API guards), creating, editing and soft-deleting users, and the inbound-email webhook (`e2e/TEST_SUMMARY.md`).
+Early-stage, through the auth phase and starting on user management. PostgreSQL + Prisma are wired up (`server/prisma/schema.prisma`, three migrations, an idempotent admin `seed.ts`), and Better Auth provides session auth with a `role` field on users (`server/src/lib/auth.ts`, `requireAuth` / `requireAdmin` middleware). The client has routing, a protected layout, a login form built on shadcn, and an admin-gated `/users` page that lists users from `GET /api/users` and creates, edits and soft-deletes them in dialogs (`server/src/routes/users.ts`). Vitest + React Testing Library component tests cover the pages, forms, navbar and client routing (`bun run --filter client test`). Playwright runs against a separate `helpdesk_test` database, with 78 E2E tests covering auth (login, sessions, logout, route gating, the API guards), creating, editing and soft-deleting users, the inbound-email webhook and `GET /api/tickets` (`e2e/TEST_SUMMARY.md`). New tests default to component tests; see *Choosing a test layer*.
 
-A `Ticket` model exists, and inbound email creates tickets through a secret-guarded webhook (see *Inbound email* below), ahead of the rest of Phase 4.
+A `Ticket` model exists, and inbound email creates tickets through a secret-guarded webhook (see *Inbound email* below). Any signed-in user can list tickets, newest first, on `/tickets` (`TicketsPage` / `TicketsTable`) from `GET /api/tickets` (`server/src/routes/tickets.ts`, mounted behind `requireAuth` only).
 
-Not yet built: ticket CRUD endpoints and UI, AI integration, an email provider (inbound adapter and outbound replies), and the dashboard. See `project-scope.md`, `tech-stack.md`, and `implementation-plan.md` for the intended design and build order before adding features, since the target architecture below is still ahead of the current state.
+Not yet built: the rest of ticket CRUD (create, detail, update, and filtering/sorting of the list), AI integration, an email provider (inbound adapter and outbound replies), and the dashboard. See `project-scope.md`, `tech-stack.md`, and `implementation-plan.md` for the intended design and build order before adding features, since the target architecture below is still ahead of the current state.
 
 ## Documentation lookup
 
@@ -56,6 +56,14 @@ bun run preview          # preview production build
 bun run test            # component tests, single pass (vitest run)
 bun run test:watch      # watch mode for writing tests (reruns on save)
 ```
+
+### Choosing a test layer: component tests first
+
+**Rely mostly on component tests; write an E2E test only when necessary.** Component tests are fast, need no database or consent, and run on every change; each E2E run resets `helpdesk_test` and needs the user's go-ahead.
+
+- **Component test** (the default) for anything the client decides: what a page or form renders, loading/empty/error states, validation messages, labels and formatting, the order rows are shown in, navbar links, and client routing and redirects (`App.test.tsx` renders the routes with a mocked session). Mock the HTTP call.
+- **E2E test** only for what needs the real server and database: server auth and role guards (401/403), what an endpoint actually stores or returns (fields, sorting, dedupe, validation responses), Better Auth behaviour (sign-in, sessions, soft-deleted users), and a flow whose correctness depends on client and server together. Test these at the API level (`request`) where possible; drive the browser only when the point is the full stack in the UI.
+- Don't duplicate: if a component test already covers a UI behaviour, don't re-check it in E2E. The `/tickets` page is the reference split — UI in `TicketsPage.test.tsx`, `Navbar.test.tsx` and `App.test.tsx`; only the `GET /api/tickets` API tests in `e2e/tests/tickets.spec.ts`.
 
 ### Writing component tests: use the `component-test-writer` agent
 

@@ -1,4 +1,5 @@
 import { screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import axios from 'axios'
 import { Role } from 'core/constants/role'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -22,7 +23,7 @@ async function expectLoginPage() {
 
 describe('App routing', () => {
   describe('without a session', () => {
-    it.each(['/', '/users', '/no-such-page'])('sends %s to the login page', async (route) => {
+    it.each(['/', '/tickets', '/users', '/no-such-page'])('sends %s to the login page', async (route) => {
       mockSession(null)
       renderWithRouter(<App />, route)
 
@@ -81,6 +82,24 @@ describe('App routing', () => {
     expect(await screen.findByRole('cell', { name: 'admin@example.com' })).toBeInTheDocument()
     expect(get).toHaveBeenCalledWith('/api/users')
     expect(screen.getByRole('link', { name: 'Users' })).toHaveAttribute('href', '/users')
+    expect(screen.queryByRole('heading', { name: /Welcome/ })).not.toBeInTheDocument()
+  })
+
+  it.each([
+    { name: 'Alan Agent', role: Role.agent },
+    { name: 'Ada Admin', role: Role.admin },
+  ])('takes $role from the Tickets link to the Tickets page', async (sessionUser) => {
+    const user = userEvent.setup()
+    const get = vi.spyOn(axios, 'get').mockResolvedValue({ data: { tickets: [] } })
+    mockSession(sessionUser)
+    renderWithRouter(<App />, '/')
+    expect(await screen.findByRole('heading', { name: `Welcome, ${sessionUser.name}` })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('link', { name: 'Tickets' }))
+
+    expect(await screen.findByRole('heading', { name: 'Tickets', level: 1 })).toBeInTheDocument()
+    expect(await screen.findByText('No tickets yet.')).toBeInTheDocument()
+    expect(get).toHaveBeenCalledWith('/api/tickets')
     expect(screen.queryByRole('heading', { name: /Welcome/ })).not.toBeInTheDocument()
   })
 })

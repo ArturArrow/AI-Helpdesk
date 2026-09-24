@@ -3,8 +3,8 @@
 ## Last run
 
 - **Date:** 2026-09-24
-- **Discovered (`--list`):** 73 tests in 6 files (api-auth 16, login 6, routing 5, session 7, users 22, webhook 17)
-- **Result:** 73 passed, 0 failed, 19.9s (chromium).
+- **Discovered (`--list`):** 78 tests in 7 files (api-auth 16, login 6, routing 5, session 7, tickets 5, users 22, webhook 17)
+- **Result:** not run since the `/tickets` page tests were removed from `tickets.spec.ts`. Before that change: 82 passed, 0 failed, 23.4s (chromium).
 
 ## tests/login.spec.ts
 
@@ -90,6 +90,16 @@ POST `/api/webhooks/inbound-email`. The route returns only `{"ticket":{"id":<num
 - Malformed JSON gets a JSON 400 with no HTML and no stack frames.
 - A body over 100 kB gets 413 with a JSON `{"error":...}`.
 
+## tests/tickets.spec.ts
+
+GET `/api/tickets` only. Other specs create tickets too, so these tests find their own by unique subject and compare relative order, never positions or counts.
+
+- GET `/api/tickets` without a session gets 401 `{"error":"Unauthorized"}`.
+- The agent gets 200 and the list holds a ticket just created through the webhook.
+- The admin gets the same 200 and listing.
+- A webhook ticket sent with `bodyHTML`, a `messageId` and a mixed-case email is listed with exactly `id`, `subject`, `senderName`, `senderEmail` (lower-cased), `status` `open`, `category` null and a parseable `createdAt`. Every listed ticket has exactly those seven keys (no `body`, `bodyHTML` or `messageId`).
+- Three tickets created in sequence are listed newest first, and the whole list's `createdAt` values are descending.
+
 ## Harness helpers
 
 - **`fixtures/auth.ts`:**
@@ -107,6 +117,7 @@ POST `/api/webhooks/inbound-email`. The route returns only `{"ticket":{"id":<num
   - `deleteUserViaApi(request, id)` soft-deletes a user through DELETE `/api/users/:id` (signed in as the admin) and asserts 204.
   - `users.spec.ts` keeps its own `userRow`, `openNewUserDialog`, `submitNewUser`, `openEditDialog`, `openDeleteDialog` and `postSignIn`, which only it uses.
 - **`fixtures/webhook.ts`:** `inboundSecret()` reads `INBOUND_EMAIL_SECRET` from `server/.env.test` (the file `start:test` loads) with `node:util`'s `parseEnv`, so the tests and the server share one value. It reads lazily and throws a clear error if the value is missing, so other specs still load. `webhook.spec.ts` keeps its own `validEmail` (unique sender per call), `uniqueMessageId`, `postInbound`, `expectUnauthorized` and `expectCreated`.
+- **`fixtures/tickets.ts`:** `createTicketViaWebhook(request, label)` posts a unique email (subject `E2E <label> <suffix>`, unique sender) to the inbound webhook with the secret, asserts 201 and returns the ticket's `id`, `subject`, `senderName` and `senderEmail`. It needs no session.
 - Helpers are plain exported functions: no page objects and no `test.extend` fixtures.
 - **`global-setup.ts`:** runs the test-DB guard, `prisma migrate reset --force`, the admin seed, then `seed-agent.ts`. Each run starts with two users: the admin and the agent.
 - **`seed-agent.ts`:** creates the agent through Better Auth's `internalAdapter`, like `prisma/seed.ts` creates the admin. It reads the credentials from `E2E_AGENT_*` environment variables and skips if the agent already exists.
@@ -126,13 +137,15 @@ POST `/api/webhooks/inbound-email`. The route returns only `{"ticket":{"id":<num
 - **Editing a user's role:** PATCH accepts only name, email and password, so there is nothing to test.
 - **Deleting an admin through the UI:** admin rows have no delete button, so it's covered only at the API (403).
 - **The "Deleting…" pending state:** not tested; it would need holding the DELETE request.
-- **Stored webhook tickets:** the response carries only the id and there is no endpoint to read tickets, so the tests can't check that a ticket is `open` with `category` and `assignedToId` null, that sender fields, body, `bodyHTML` and `messageId` are stored as sent (and senderEmail lower-cased), that a missing or blank subject becomes `"(no subject)"`, that a dedupe creates no second row, or that a 400 creates nothing.
+- **Stored webhook tickets, beyond the list fields:** GET `/api/tickets` now shows subject, sender, status and category (checked in `tickets.spec.ts`), but not `body`, `bodyHTML`, `messageId` or `assignedToId`, so those can't be checked as stored. `webhook.spec.ts` still checks only responses: that a missing or blank subject is listed as `"(no subject)"`, that a dedupe adds no second row, and that a 400 creates nothing could now be checked through the list but haven't been added.
+- **The `/tickets` page UI:** the table's headers, rows and order, the category label, the empty, loading and error states, and the Tickets navbar link are covered by the Vitest component tests (`client/src/pages/TicketsPage.test.tsx`, `client/src/components/Navbar.test.tsx`), not E2E. The client redirect of an unauthenticated `/tickets` visit and the navbar link navigating there are covered in `client/src/App.test.tsx`; the server side is covered by the GET `/api/tickets` 401. E2E keeps the API tests, which need the real server and database.
 - **The P2002 fallback specifically:** the concurrent test fires two posts at once and checks the outcome (one 201, one 200, same id), but can't force which path answers the 200, the `findUnique` lookup or the unique-constraint catch.
-- **Not built yet:** restoring a deleted user, ticket CRUD (beyond webhook creation), AI features, email, and the dashboard.
+- **Not built yet:** restoring a deleted user, ticket CRUD beyond webhook creation and the list (detail, update, assignment), AI features, email, and the dashboard.
 
 ## Open questions
 
 - **No return-to after login:** a user bounced from a deep link (e.g. `/users`) lands on `/` after signing in, not on the page they asked for. `routing.spec.ts` records this behaviour. If a return-to redirect is added, that test needs updating.
 - **A deleted user's email stays reserved:** POST and PATCH still see soft-deleted users, so the email can't be reused (409), and nothing in the UI shows why. `users.spec.ts` records this.
-- **Webhook storage is unobservable:** to test it, the route would need to return the full ticket (e.g. drop or widen the `select: { id: true }` in `server/src/routes/webhook.ts`), or a GET ticket endpoint would need to exist (planned with ticket CRUD). The webhook tests then need extending.
-- **App changes needed:** none to run the current suite. Every locator uses an accessible label, role or text. The webhook storage checks above need one of the app changes listed.
+- **Webhook storage is only partly observable:** GET `/api/tickets` exposes the list fields; the body fields need a ticket detail endpoint (planned with ticket CRUD).
+- **The ticket list is unpaginated:** GET `/api/tickets` returns every ticket. `tickets.spec.ts` looks tickets up in the full list, so adding pagination will need those tests updated.
+- **App changes needed:** none to run the current suite. Every locator uses an accessible label, role or text.

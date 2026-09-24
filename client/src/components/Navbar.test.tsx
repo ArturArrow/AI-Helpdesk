@@ -37,6 +37,12 @@ describe('Navbar', () => {
     expect(screen.queryByRole('link', { name: 'Users' })).not.toBeInTheDocument()
   })
 
+  it.each([true, false])('shows the Tickets link (isAdmin: %s)', (isAdmin) => {
+    renderNavbar(isAdmin)
+
+    expect(screen.getByRole('link', { name: 'Tickets' })).toHaveAttribute('href', '/tickets')
+  })
+
   it('shows the Helpdesk home link and the user name', () => {
     renderNavbar(false)
 
