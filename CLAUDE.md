@@ -57,6 +57,10 @@ bun run test            # component tests, single pass (vitest run)
 bun run test:watch      # watch mode for writing tests (reruns on save)
 ```
 
+### Tests only on request
+
+**Don't write tests as part of building a feature.** Write, extend or fix tests (component or E2E, including sending either test-writer agent) only when the user explicitly asks for them. When a feature is done, run the existing component tests (`bun run --filter client test`) and report the result; if the change breaks existing tests, say which and why, and leave them until the user asks. At most, offer tests in one line at the end.
+
 ### Choosing a test layer: component tests first
 
 **Rely mostly on component tests; write an E2E test only when necessary.** Component tests are fast, need no database or consent, and run on every change; each E2E run resets `helpdesk_test` and needs the user's go-ahead.
