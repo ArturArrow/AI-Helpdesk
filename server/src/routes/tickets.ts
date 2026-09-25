@@ -25,13 +25,13 @@ function escapeLike(text: string) {
   return text.replace(/[\\%_]/g, "\\$&");
 }
 
-// Filtered and sorted on the server (the client table uses manualSorting). Defaults to all
-// tickets, newest first.
+// Filtered, sorted and paginated on the server (the client table uses manualSorting).
+// Defaults to all tickets, newest first, first page of DEFAULT_TICKET_PAGE_SIZE.
 // Status and category are Postgres enums, so they sort in declaration order, not by label.
 ticketsRouter.get("/", async (req, res) => {
   const query = validateQuery(ticketListQuerySchema, req, res);
   if (!query) return;
-  const { sortBy, sortOrder, status, category, q } = query;
+  const { sortBy, sortOrder, status, category, q, page, pageSize } = query;
 
   // An absent filter is undefined, which Prisma ignores.
   const where: Prisma.TicketWhereInput = {
@@ -55,6 +55,16 @@ ticketsRouter.get("/", async (req, res) => {
           { id: "desc" },
         ];
 
-  const tickets = await prisma.ticket.findMany({ where, select: ticketListSelect, orderBy });
-  res.json({ tickets });
+  // One transaction, so the total matches the page it's reported with.
+  const [tickets, total] = await prisma.$transaction([
+    prisma.ticket.findMany({
+      where,
+      select: ticketListSelect,
+      orderBy,
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    prisma.ticket.count({ where }),
+  ]);
+  res.json({ tickets, total });
 });

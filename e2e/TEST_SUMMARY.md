@@ -3,9 +3,9 @@
 ## Last run
 
 - **Date:** 2026-09-25
-- **Discovered (`--list`):** 125 tests in 7 files (api-auth 16, login 6, routing 5, session 7, tickets 52, users 22, webhook 17)
-- **Result:** 125 passed, 0 failed, 30.2s (chromium).
-- **Before that change (2026-09-25):** 109 passed, 0 failed, 33.3s (chromium).
+- **Discovered (`--list`):** 143 tests in 7 files (api-auth 16, login 6, routing 5, session 7, tickets 70, users 22, webhook 17)
+- **Result:** not run since the page-size change (default `pageSize` 20 -> 10).
+- **Before that change (2026-09-25):** 143 passed, 0 failed, 28.0s (chromium).
 
 ## tests/login.spec.ts
 
@@ -93,13 +93,13 @@ POST `/api/webhooks/inbound-email`. The route returns only `{"ticket":{"id":<num
 
 ## tests/tickets.spec.ts
 
-GET `/api/tickets` only. Other specs create tickets too, so these tests find their own by unique subject and compare relative order, never positions or counts.
+GET `/api/tickets` only. Other specs create tickets too and the list is paginated (10 by default, `DEFAULT_TICKET_PAGE_SIZE`), so each test narrows the list to its own tickets with `q=<unique token>`, or uses `pageSize=100` when a check covers every row. They compare relative order, never positions or counts, except where `q` makes the matching set exactly the test's tickets.
 
 - GET `/api/tickets` without a session gets 401 `{"error":"Unauthorized"}`.
 - The agent gets 200 and the list holds a ticket just created through the webhook.
 - The admin gets the same 200 and listing.
-- A webhook ticket sent with `bodyHTML`, a `messageId` and a mixed-case email is listed with exactly `id`, `subject`, `senderName`, `senderEmail` (lower-cased), `status` `open`, `category` null and a parseable `createdAt`. Every listed ticket has exactly those seven keys (no `body`, `bodyHTML` or `messageId`).
-- Three tickets created in sequence are listed newest first, and the whole list's `createdAt` values are descending.
+- A webhook ticket sent with `bodyHTML`, a `messageId` and a mixed-case email is listed with exactly `id`, `subject`, `senderName`, `senderEmail` (lower-cased), `status` `open`, `category` null and a parseable `createdAt`. The response has exactly `tickets` and a numeric `total`, and every ticket on a page of 100 has exactly those seven keys (no `body`, `bodyHTML` or `messageId`).
+- Three tickets created in sequence are listed newest first, and a full page's `createdAt` values are descending.
 
 Sorting (`sortBy`, `sortOrder` query params):
 
@@ -110,11 +110,11 @@ Sorting (`sortBy`, `sortOrder` query params):
 - `sortBy=subject&sortOrder=desc`: the same setup is listed C, B, A.
 - `sortBy=senderName` with no `sortOrder` lists sender names descending (the default), and with `asc` ascending.
 - Two tickets with the same subject are listed newest first under `sortBy=subject` in both directions (the `createdAt desc` tie-break).
-- `sortBy=createdAt&sortOrder=asc` lists three tickets oldest first, and the whole list's `createdAt` values are ascending.
+- `sortBy=createdAt&sortOrder=asc` lists three tickets oldest first, and a full page's `createdAt` values are ascending.
 - `sortBy=category` in both directions returns 200, the test's three (unclassified, `category` null) tickets are newest first.
 - `sortBy=status` in both directions returns 200.
 
-Filtering (`status`, `category` query params). The webhook creates only open, unclassified tickets, so each test checks that a filter keeps or drops the test's own ticket and that every returned row matches; other values may return an empty list.
+Filtering (`status`, `category` query params). The webhook creates only open, unclassified tickets, so each test checks that a filter (narrowed by `q` to the ticket's subject) keeps or drops the test's own ticket, and that every row of a page of 100 under that filter matches; other values may return an empty list.
 
 - Without a session, both valid and invalid filter params get 401 `{"error":"Unauthorized"}`.
 - `status=open` lists the new ticket, and every row has status `open`.
@@ -134,13 +134,24 @@ Search (`q` query param). Each test searches for a token unique to it, so the ma
 - A token only in the `subject`, `senderName`, `senderEmail` or `body` (one test each) returns exactly that ticket and not a control ticket without it. For all but `body` (not in the list response), every row holds the token in a listed field.
 - An upper-cased and a lower-cased form of a mixed-case subject token both find the ticket.
 - Leading and trailing spaces around the token are trimmed.
-- `q=%20%20` and an empty `q=` return the same ids, in the same order, as no `q`.
+- `q=%20%20` and an empty `q=` return the same ids, in the same order, and the same `total` as no `q` (all with `pageSize=100`).
 - `q` + `status=open` + `sortBy=subject` with `asc` and `desc` (one test each): three tickets created B, C, A come back as exactly A, B, C or C, B, A; a control ticket is excluded; the same query with `status=resolved` returns `[]`.
 - A subject token `50%_off-<suffix>` is found by that exact text, and a decoy `50ABoff-<suffix>` (which the unescaped wildcards would match) is not.
 - `q=%` and `q=_` (one test each) include a ticket with that character in its subject and exclude a new ticket without it.
 - A token with a backslash (`back\slash-<suffix>`) matches literally, and a decoy `backslash-<suffix>` (it would match if the backslash weren't escaped, since `\s` in LIKE means a plain `s`) is not.
 - A 201-character `q` gets 400 `{"error":"q is too long"}`; exactly 200 characters gets 200.
 - A repeated `q=a&q=b` gets 400 `{"error":"q must be a single string"}`.
+
+Pagination (`page`, `pageSize` query params). Each test narrows with its own `q` token, so `total` is exact.
+
+- Without a session, valid and invalid paging params get 401 `{"error":"Unauthorized"}`.
+- Five tickets with `pageSize=2`: pages 1, 2 and 3 hold 2, 2 and 1 tickets, each with `total: 5`; the pages don't overlap and, joined in order, equal the unpaginated list, which is newest first.
+- With `sortBy=subject&sortOrder=asc&pageSize=2`, five tickets created D, B, E, A, C come back as pages [A, B], [C, D], [E], matching the unpaginated sorted list.
+- `page=4&pageSize=2` past the end returns `{"tickets":[],"total":5}`.
+- `total` follows the filters: 1 for the token, 0 (with `tickets: []`) for a `q` matching nothing and for the token with `status=resolved`.
+- Without `pageSize`, a page holds `min(total, 10)` tickets (exactly 10 when the DB has more), the same ids as `pageSize=10`, and `pageSize=100` reports the same `total`.
+- 400 `{"error":"page must be a positive integer"}` for `page=0`, `-1`, `abc`, `1.5`, an empty `page=` and a repeated `page=1&page=2`; 400 `{"error":"page is too large"}` for `page=1000001`; 400 `{"error":"pageSize must be an integer from 1 to 100"}` for `pageSize=0`, `101`, `abc` and a repeated `pageSize` (one test each).
+- `pageSize=100` gets 200 with at most 100 tickets, and `page=1000000` gets 200 with `tickets: []` and a numeric `total`.
 
 ## Harness helpers
 
@@ -159,7 +170,7 @@ Search (`q` query param). Each test searches for a token unique to it, so the ma
   - `deleteUserViaApi(request, id)` soft-deletes a user through DELETE `/api/users/:id` (signed in as the admin) and asserts 204.
   - `users.spec.ts` keeps its own `userRow`, `openNewUserDialog`, `submitNewUser`, `openEditDialog`, `openDeleteDialog` and `postSignIn`, which only it uses.
 - **`fixtures/webhook.ts`:** `inboundSecret()` reads `INBOUND_EMAIL_SECRET` from `server/.env.test` (the file `start:test` loads) with `node:util`'s `parseEnv`, so the tests and the server share one value. It reads lazily and throws a clear error if the value is missing, so other specs still load. `webhook.spec.ts` keeps its own `validEmail` (unique sender per call), `uniqueMessageId`, `postInbound`, `expectUnauthorized` and `expectCreated`.
-- **`fixtures/tickets.ts`:** `createTicketViaWebhook(request, label, overrides?)` posts a unique email (subject `E2E <label> <suffix>`, unique sender, body `Please help.`) to the inbound webhook with the secret, asserts 201 and returns the ticket's `id`, `subject`, `senderName` and `senderEmail`. `overrides` sets `subject`, `senderName`, `senderEmail` or `body` exactly, for the sorting and search tests. The defaults contain no `%`, `_` or `\`. It needs no session. `tickets.spec.ts` keeps its own `listTickets(request, params)` (GET with sort, filter and search params, asserts 200), `expectInOrder(tickets, ids)` (the ids are listed in that relative order), `searchOverride(field, token)` (puts a token into one field) and `expectAllContain(tickets, text)` (every row holds the text in subject, sender name or email).
+- **`fixtures/tickets.ts`:** `createTicketViaWebhook(request, label, overrides?)` posts a unique email (subject `E2E <label> <suffix>`, unique sender, body `Please help.`) to the inbound webhook with the secret, asserts 201 and returns the ticket's `id`, `subject`, `senderName` and `senderEmail`. `overrides` sets `subject`, `senderName`, `senderEmail` or `body` exactly, for the sorting and search tests. The defaults contain no `%`, `_` or `\`. It needs no session. `tickets.spec.ts` keeps its own `getTicketPage(request, params)` (GET with sort, filter, search and paging params, asserts 200, returns `{ tickets, total }`), `listTickets(request, params)` (the same, returning only `tickets`), `expectInOrder(tickets, ids)` (the ids are listed in that relative order), `searchOverride(field, token)` (puts a token into one field) `expectAllContain(tickets, text)` (every row holds the text in subject, sender name or email), `expectRowsMatch(tickets, filters)` and `expectFilter(request, filters, id, subject, listed)` (the filter keeps or drops the ticket, and every row of a page of 100 matches), and `createTicketsWithToken(request, token, labels)` (one ticket per label, subject `<token> <label>`).
 - Helpers are plain exported functions: no page objects and no `test.extend` fixtures.
 - **`global-setup.ts`:** runs the test-DB guard, `prisma migrate reset --force`, the admin seed, then `seed-agent.ts`. Each run starts with two users: the admin and the agent.
 - **`seed-agent.ts`:** creates the agent through Better Auth's `internalAdapter`, like `prisma/seed.ts` creates the admin. It reads the credentials from `E2E_AGENT_*` environment variables and skips if the agent already exists.
@@ -185,6 +196,7 @@ Search (`q` query param). Each test searches for a token unique to it, so the ma
 - **Filtering on statuses and categories that exist:** no ticket in `helpdesk_test` is ever resolved, closed or classified (the webhook creates only open, unclassified tickets, no endpoint changes them, and the tests don't write to the DB directly). So `status=resolved|closed` and each real category are only shown to exclude open, unclassified tickets, not to include matching ones, and combined filters are never checked against a mixed set. A test-only seed of varied tickets in global setup (like `seed-agent.ts`, via Prisma) would cover this now; ticket update endpoints would make it possible through the API later.
 - **Collation-sensitive subject order:** the sorting tests use subjects that differ only in a final capital letter, so they pass under any Postgres collation; mixed case, accents and punctuation aren't tested.
 - **The P2002 fallback specifically:** the concurrent test fires two posts at once and checks the outcome (one 201, one 200, same id), but can't force which path answers the 200, the `findUnique` lookup or the unique-constraint catch.
+- **Pagination UI and the count/page consistency under concurrent writes:** the table's paging controls are covered by Vitest, not E2E. That `total` and the page come from one `$transaction` can't be observed from a serial test.
 - **Search ranking, multi-word and accent handling:** `q` is one case-insensitive substring over four fields; tokens aren't split, results aren't ranked, and accent-insensitive matching isn't tested (Postgres `ILIKE` doesn't fold accents).
 - **Search on `body` rows:** the list doesn't return `body`, so the body-search test can only check which ids come back, not the matched text.
 - **Not built yet:** restoring a deleted user, ticket CRUD beyond webhook creation and the list (detail, update, assignment), AI features, email, and the dashboard.
@@ -194,7 +206,8 @@ Search (`q` query param). Each test searches for a token unique to it, so the ma
 - **No return-to after login:** a user bounced from a deep link (e.g. `/users`) lands on `/` after signing in, not on the page they asked for. `routing.spec.ts` records this behaviour. If a return-to redirect is added, that test needs updating.
 - **A deleted user's email stays reserved:** POST and PATCH still see soft-deleted users, so the email can't be reused (409), and nothing in the UI shows why. `users.spec.ts` records this.
 - **Webhook storage is only partly observable:** GET `/api/tickets` exposes the list fields; the body fields need a ticket detail endpoint (planned with ticket CRUD).
-- **The ticket list is unpaginated:** GET `/api/tickets` returns every ticket. `tickets.spec.ts` looks tickets up in the full list, so adding pagination will need those tests updated.
+- **Resolved: the ticket list is paginated** (`page`, `pageSize`, `{ tickets, total }`), and `tickets.spec.ts` now narrows each list with `q` or `pageSize=100`.
+- **"Every row matches" checks cover one page:** filter and sort checks over all rows look at the first 100 tickets only, since `pageSize` is capped at 100. Enough for the test DB today; walking every page would be needed if it grows past that.
 - **Subject and sender sorting follow the database collation:** the order of mixed-case or accented values depends on `helpdesk_test`'s collation, which may differ from production's. Not asserted.
 - **Varied-ticket seed for E2E:** whether to add a test-only seed of tickets with every status and category to global setup, so the filter tests (and the status/category sort order) can check inclusion, not just exclusion. Not added.
 - **Search is a sequential `ILIKE` scan:** the route comment says so; fine at this size, a trigram index or full-text search if the table grows. Not something a test checks.

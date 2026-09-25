@@ -2,6 +2,7 @@ import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import axios from 'axios'
 import { Role } from 'core/constants/role'
+import { DEFAULT_TICKET_PAGE_SIZE } from 'core/schemas/tickets'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderWithRouter } from '@/test/render.tsx'
 import { mockSession } from '@/test/session.ts'
@@ -90,7 +91,7 @@ describe('App routing', () => {
     { name: 'Ada Admin', role: Role.admin },
   ])('takes $role from the Tickets link to the Tickets page', async (sessionUser) => {
     const user = userEvent.setup()
-    const get = vi.spyOn(axios, 'get').mockResolvedValue({ data: { tickets: [] } })
+    const get = vi.spyOn(axios, 'get').mockResolvedValue({ data: { tickets: [], total: 0 } })
     mockSession(sessionUser)
     renderWithRouter(<App />, '/')
     expect(await screen.findByRole('heading', { name: `Welcome, ${sessionUser.name}` })).toBeInTheDocument()
@@ -99,7 +100,7 @@ describe('App routing', () => {
 
     expect(await screen.findByRole('heading', { name: 'Tickets', level: 1 })).toBeInTheDocument()
     expect(await screen.findByText('No tickets yet.')).toBeInTheDocument()
-    expect(get).toHaveBeenCalledWith('/api/tickets', { params: { sortBy: 'createdAt', sortOrder: 'desc' } })
+    expect(get).toHaveBeenCalledWith('/api/tickets', { params: { sortBy: 'createdAt', sortOrder: 'desc', page: 1, pageSize: DEFAULT_TICKET_PAGE_SIZE } })
     expect(screen.queryByRole('heading', { name: /Welcome/ })).not.toBeInTheDocument()
   })
 })

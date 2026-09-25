@@ -31,6 +31,8 @@ export type InboundEmailInput = z.input<typeof inboundEmailSchema>;
 export const ticketSortFields = ["subject", "senderName", "status", "category", "createdAt"] as const;
 
 export const UNCLASSIFIED = "unclassified";
+export const DEFAULT_TICKET_PAGE_SIZE = 10;
+export const MAX_TICKET_PAGE_SIZE = 100;
 
 export const ticketListQuerySchema = z.object({
   sortBy: z
@@ -48,6 +50,20 @@ export const ticketListQuerySchema = z.object({
     .optional(),
   // Free-text search over subject, sender and body. Blank means no text filter.
   q: z.string({ error: "q must be a single string" }).trim().max(200, "q is too long").optional(),
+  // 1-based. A page past the end returns no tickets, with the real total.
+  page: z.coerce
+    .number({ error: "page must be a positive integer" })
+    .int("page must be a positive integer")
+    .min(1, "page must be a positive integer")
+    // Keeps (page - 1) * pageSize within Prisma's 32-bit `skip`.
+    .max(1_000_000, "page is too large")
+    .default(1),
+  pageSize: z.coerce
+    .number({ error: `pageSize must be an integer from 1 to ${MAX_TICKET_PAGE_SIZE}` })
+    .int(`pageSize must be an integer from 1 to ${MAX_TICKET_PAGE_SIZE}`)
+    .min(1, `pageSize must be an integer from 1 to ${MAX_TICKET_PAGE_SIZE}`)
+    .max(MAX_TICKET_PAGE_SIZE, `pageSize must be an integer from 1 to ${MAX_TICKET_PAGE_SIZE}`)
+    .default(DEFAULT_TICKET_PAGE_SIZE),
 });
 
 export type TicketSortField = (typeof ticketSortFields)[number];

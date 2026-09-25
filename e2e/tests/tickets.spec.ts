@@ -4,8 +4,10 @@ import { createTicketViaWebhook } from '../fixtures/tickets.js'
 import { uniqueSuffix } from '../fixtures/users.js'
 import { inboundSecret } from '../fixtures/webhook.js'
 
-// Other specs create tickets in the same database, so these tests find their own rows by unique
-// subject and compare relative order, never absolute positions or counts.
+// Other specs create tickets in the same database and the list is paginated (10 per page by
+// default), so these tests narrow each list to their own tickets with `q=<unique token>`, or ask
+// for `pageSize=100` when a check covers every row. They compare relative order, never absolute
+// positions or counts, except where `q` makes the matching set exactly the test's own tickets.
 
 type ListedTicket = { id: number; subject: string }
 
@@ -21,7 +23,7 @@ test.describe('GET /api/tickets', () => {
       const ticket = await createTicketViaWebhook(request)
       await signInViaApi(request, user)
 
-      const res = await request.get('/api/tickets')
+      const res = await request.get('/api/tickets', { params: { q: ticket.subject } })
       expect(res.status()).toBe(200)
       const { tickets } = await res.json()
       expect(tickets).toContainEqual(expect.objectContaining({ id: ticket.id, subject: ticket.subject }))
@@ -45,8 +47,8 @@ test.describe('GET /api/tickets', () => {
     const { ticket: created } = await res.json()
 
     await signInViaApi(request, AGENT)
-    const { tickets } = await (await request.get('/api/tickets')).json()
-    const ticket = tickets.find((t: ListedTicket) => t.id === created.id)
+    const { tickets: found } = await (await request.get('/api/tickets', { params: { q: suffix } })).json()
+    const ticket = found.find((t: ListedTicket) => t.id === created.id)
 
     expect(ticket).toEqual({
       id: created.id,
@@ -58,6 +60,13 @@ test.describe('GET /api/tickets', () => {
       createdAt: expect.any(String),
     })
     expect(Number.isNaN(Date.parse(ticket.createdAt))).toBe(false)
+
+    // Every row of a full page has the same keys, and the response is just `tickets` and `total`.
+    const body = await (await request.get('/api/tickets', { params: { pageSize: '100' } })).json()
+    expect(Object.keys(body).sort()).toEqual(['tickets', 'total'])
+    expect(body.total).toEqual(expect.any(Number))
+    const tickets: ListedTicket[] = body.tickets
+    expect(tickets.length).toBeGreaterThan(0)
     for (const t of tickets) {
       expect(Object.keys(t).sort()).toEqual(
         ['category', 'createdAt', 'id', 'senderEmail', 'senderName', 'status', 'subject'],
@@ -66,19 +75,21 @@ test.describe('GET /api/tickets', () => {
   })
 
   test('tickets are ordered newest first', async ({ request }) => {
-    const first = await createTicketViaWebhook(request, 'first')
-    const second = await createTicketViaWebhook(request, 'second')
-    const third = await createTicketViaWebhook(request, 'third')
+    const token = `E2E order ${uniqueSuffix()}`
+    const first = await createTicketViaWebhook(request, 'first', { subject: `${token} first` })
+    const second = await createTicketViaWebhook(request, 'second', { subject: `${token} second` })
+    const third = await createTicketViaWebhook(request, 'third', { subject: `${token} third` })
     await signInViaApi(request, AGENT)
 
-    const { tickets } = await (await request.get('/api/tickets')).json()
-    const ids: number[] = tickets.map((t: ListedTicket) => t.id)
+    const { tickets: ours } = await (await request.get('/api/tickets', { params: { q: token } })).json()
+    const ids: number[] = ours.map((t: ListedTicket) => t.id)
     const positions = [third.id, second.id, first.id].map((id) => ids.indexOf(id))
 
     expect(positions).not.toContain(-1)
     expect(positions).toEqual([...positions].sort((a, b) => a - b))
 
-    // The whole list is newest first too, not just our three.
+    // A full page is newest first too, not just our three.
+    const { tickets } = await (await request.get('/api/tickets', { params: { pageSize: '100' } })).json()
     const times: number[] = tickets.map((t: { createdAt: string }) => Date.parse(t.createdAt))
     expect(times).toEqual([...times].sort((a, b) => b - a))
   })
@@ -93,11 +104,20 @@ type SortedTicket = ListedTicket & {
   createdAt: string
 }
 
-// GETs /api/tickets with the given sort and filter params and asserts 200.
-async function listTickets(request: APIRequestContext, params: Record<string, string>): Promise<SortedTicket[]> {
+// GETs /api/tickets with the given sort, filter, search and paging params, asserts 200 and
+// returns the whole body.
+async function getTicketPage(
+  request: APIRequestContext,
+  params: Record<string, string>,
+): Promise<{ tickets: SortedTicket[]; total: number }> {
   const res = await request.get('/api/tickets', { params })
   expect(res.status(), `GET /api/tickets ${new URLSearchParams(params)}`).toBe(200)
-  return (await res.json()).tickets
+  return res.json()
+}
+
+// Same as getTicketPage, returning only the tickets.
+async function listTickets(request: APIRequestContext, params: Record<string, string>): Promise<SortedTicket[]> {
+  return (await getTicketPage(request, params)).tickets
 }
 
 // Asserts every id is listed and they appear in the given order (others may sit in between).
@@ -143,7 +163,7 @@ test.describe('GET /api/tickets sorting', () => {
       const a = await createTicketViaWebhook(request, 'a', { subject: `${prefix} A` })
       await signInViaApi(request, AGENT)
 
-      const tickets = await listTickets(request, { sortBy: 'subject', sortOrder })
+      const tickets = await listTickets(request, { q: prefix, sortBy: 'subject', sortOrder })
       expectInOrder(tickets, sortOrder === 'asc' ? [a.id, b.id, c.id] : [c.id, b.id, a.id])
     })
   }
@@ -155,8 +175,8 @@ test.describe('GET /api/tickets sorting', () => {
     const c = await createTicketViaWebhook(request, 'c', { senderName: `${prefix} C` })
     await signInViaApi(request, ADMIN)
 
-    expectInOrder(await listTickets(request, { sortBy: 'senderName' }), [c.id, b.id, a.id])
-    expectInOrder(await listTickets(request, { sortBy: 'senderName', sortOrder: 'asc' }), [a.id, b.id, c.id])
+    expectInOrder(await listTickets(request, { q: prefix, sortBy: 'senderName' }), [c.id, b.id, a.id])
+    expectInOrder(await listTickets(request, { q: prefix, sortBy: 'senderName', sortOrder: 'asc' }), [a.id, b.id, c.id])
   })
 
   test('equal subjects fall back to newest first in both directions', async ({ request }) => {
@@ -166,19 +186,21 @@ test.describe('GET /api/tickets sorting', () => {
     await signInViaApi(request, AGENT)
 
     for (const sortOrder of ['asc', 'desc']) {
-      expectInOrder(await listTickets(request, { sortBy: 'subject', sortOrder }), [newer.id, older.id])
+      expectInOrder(await listTickets(request, { q: subject, sortBy: 'subject', sortOrder }), [newer.id, older.id])
     }
   })
 
   test('sortBy=createdAt&sortOrder=asc lists oldest first', async ({ request }) => {
-    const first = await createTicketViaWebhook(request, 'first')
-    const second = await createTicketViaWebhook(request, 'second')
-    const third = await createTicketViaWebhook(request, 'third')
+    const token = `E2E oldest ${uniqueSuffix()}`
+    const first = await createTicketViaWebhook(request, 'first', { subject: `${token} first` })
+    const second = await createTicketViaWebhook(request, 'second', { subject: `${token} second` })
+    const third = await createTicketViaWebhook(request, 'third', { subject: `${token} third` })
     await signInViaApi(request, AGENT)
 
-    const tickets = await listTickets(request, { sortBy: 'createdAt', sortOrder: 'asc' })
-    expectInOrder(tickets, [first.id, second.id, third.id])
+    expectInOrder(await listTickets(request, { q: token, sortBy: 'createdAt', sortOrder: 'asc' }), [first.id, second.id, third.id])
 
+    // A full page is oldest first too.
+    const tickets = await listTickets(request, { sortBy: 'createdAt', sortOrder: 'asc', pageSize: '100' })
     const times = tickets.map((t) => Date.parse(t.createdAt))
     expect(times).toEqual([...times].sort((x, y) => x - y))
   })
@@ -186,13 +208,14 @@ test.describe('GET /api/tickets sorting', () => {
   // The webhook creates only unclassified tickets and nothing sets a category yet, so this can only
   // check that null categories don't break the sort and that the newest-first tie-break holds.
   test('sortBy=category succeeds with unclassified tickets, newest first among equals', async ({ request }) => {
-    const first = await createTicketViaWebhook(request, 'first')
-    const second = await createTicketViaWebhook(request, 'second')
-    const third = await createTicketViaWebhook(request, 'third')
+    const token = `E2E category sort ${uniqueSuffix()}`
+    const first = await createTicketViaWebhook(request, 'first', { subject: `${token} first` })
+    const second = await createTicketViaWebhook(request, 'second', { subject: `${token} second` })
+    const third = await createTicketViaWebhook(request, 'third', { subject: `${token} third` })
     await signInViaApi(request, AGENT)
 
     for (const sortOrder of ['asc', 'desc']) {
-      const tickets = await listTickets(request, { sortBy: 'category', sortOrder })
+      const tickets = await listTickets(request, { q: token, sortBy: 'category', sortOrder })
       expectInOrder(tickets, [third.id, second.id, first.id])
       const ours = tickets.filter((t) => [first.id, second.id, third.id].includes(t.id))
       expect(ours.map((t) => t.category)).toEqual([null, null, null])
@@ -213,6 +236,25 @@ test.describe('GET /api/tickets sorting', () => {
 const STATUS_ERROR = 'status must be one of: open, resolved, closed'
 const CATEGORY_ERROR = 'category must be one of: general_question, technical_question, refund_request, unclassified'
 
+type FilterParams = { status?: string; category?: string }
+
+// Every row matches the status and category filters (`unclassified` means a null category).
+function expectRowsMatch(tickets: SortedTicket[], params: FilterParams) {
+  for (const t of tickets) {
+    if (params.status) expect(t.status).toBe(params.status)
+    if (params.category) expect(t.category).toBe(params.category === 'unclassified' ? null : params.category)
+  }
+}
+
+// Narrowed to the ticket's subject, the filter lists or drops it; on a full page of the filter,
+// every row matches.
+async function expectFilter(request: APIRequestContext, params: FilterParams, ticketId: number, subject: string, listed: boolean) {
+  const ids = (await listTickets(request, { ...params, q: subject })).map((t) => t.id)
+  if (listed) expect(ids).toContain(ticketId)
+  else expect(ids).not.toContain(ticketId)
+  expectRowsMatch(await listTickets(request, { ...params, pageSize: '100' }), params)
+}
+
 // The webhook creates only open, unclassified tickets and nothing changes them yet, so these tests
 // can show that a filter keeps or drops the test's own ticket and that every returned row matches.
 // The other statuses and categories may come back empty.
@@ -229,18 +271,14 @@ test.describe('GET /api/tickets filtering', () => {
     const ticket = await createTicketViaWebhook(request)
     await signInViaApi(request, AGENT)
 
-    const tickets = await listTickets(request, { status: 'open' })
-    expect(tickets.map((t) => t.id)).toContain(ticket.id)
-    for (const t of tickets) expect(t.status).toBe('open')
+    await expectFilter(request, { status: 'open' }, ticket.id, ticket.subject, true)
   })
 
   test('category=unclassified lists the new ticket and only tickets with a null category', async ({ request }) => {
     const ticket = await createTicketViaWebhook(request)
     await signInViaApi(request, AGENT)
 
-    const tickets = await listTickets(request, { category: 'unclassified' })
-    expect(tickets.map((t) => t.id)).toContain(ticket.id)
-    for (const t of tickets) expect(t.category).toBeNull()
+    await expectFilter(request, { category: 'unclassified' }, ticket.id, ticket.subject, true)
   })
 
   for (const status of ['resolved', 'closed']) {
@@ -248,9 +286,7 @@ test.describe('GET /api/tickets filtering', () => {
       const ticket = await createTicketViaWebhook(request)
       await signInViaApi(request, AGENT)
 
-      const tickets = await listTickets(request, { status })
-      expect(tickets.map((t) => t.id)).not.toContain(ticket.id)
-      for (const t of tickets) expect(t.status).toBe(status)
+      await expectFilter(request, { status }, ticket.id, ticket.subject, false)
     })
   }
 
@@ -259,9 +295,7 @@ test.describe('GET /api/tickets filtering', () => {
       const ticket = await createTicketViaWebhook(request)
       await signInViaApi(request, AGENT)
 
-      const tickets = await listTickets(request, { category })
-      expect(tickets.map((t) => t.id)).not.toContain(ticket.id)
-      for (const t of tickets) expect(t.category).toBe(category)
+      await expectFilter(request, { category }, ticket.id, ticket.subject, false)
     })
   }
 
@@ -269,20 +303,9 @@ test.describe('GET /api/tickets filtering', () => {
     const ticket = await createTicketViaWebhook(request)
     await signInViaApi(request, ADMIN)
 
-    const both = await listTickets(request, { status: 'open', category: 'unclassified' })
-    expect(both.map((t) => t.id)).toContain(ticket.id)
-    for (const t of both) {
-      expect(t.status).toBe('open')
-      expect(t.category).toBeNull()
-    }
-
+    await expectFilter(request, { status: 'open', category: 'unclassified' }, ticket.id, ticket.subject, true)
     for (const params of [{ status: 'open', category: 'refund_request' }, { status: 'resolved', category: 'unclassified' }]) {
-      const tickets = await listTickets(request, params)
-      expect(tickets.map((t) => t.id)).not.toContain(ticket.id)
-      for (const t of tickets) {
-        expect(t.status).toBe(params.status)
-        expect(t.category).toBe(params.category === 'unclassified' ? null : params.category)
-      }
+      await expectFilter(request, params, ticket.id, ticket.subject, false)
     }
   })
 
@@ -295,16 +318,14 @@ test.describe('GET /api/tickets filtering', () => {
       await signInViaApi(request, AGENT)
 
       const tickets = await listTickets(request, {
+        q: prefix,
         status: 'open',
         category: 'unclassified',
         sortBy: 'subject',
         sortOrder,
       })
       expectInOrder(tickets, sortOrder === 'asc' ? [a.id, b.id, c.id] : [c.id, b.id, a.id])
-      for (const t of tickets) {
-        expect(t.status).toBe('open')
-        expect(t.category).toBeNull()
-      }
+      expectRowsMatch(tickets, { status: 'open', category: 'unclassified' })
     })
   }
 
@@ -411,12 +432,16 @@ test.describe('GET /api/tickets search (q)', () => {
     const ticket = await createTicketViaWebhook(request)
     await signInViaApi(request, AGENT)
 
-    const all = (await listTickets(request, {})).map((t) => t.id)
-    expect(all).toContain(ticket.id)
-    for (const url of ['/api/tickets?q=%20%20', '/api/tickets?q=']) {
+    // The new ticket is the newest, so it is on the first page of 100.
+    const all = await getTicketPage(request, { pageSize: '100' })
+    const allIds = all.tickets.map((t) => t.id)
+    expect(allIds).toContain(ticket.id)
+    for (const url of ['/api/tickets?pageSize=100&q=%20%20', '/api/tickets?pageSize=100&q=']) {
       const res = await request.get(url)
       expect(res.status(), url).toBe(200)
-      expect((await res.json()).tickets.map((t: ListedTicket) => t.id), url).toEqual(all)
+      const body = await res.json()
+      expect(body.tickets.map((t: ListedTicket) => t.id), url).toEqual(allIds)
+      expect(body.total, url).toBe(all.total)
     }
   })
 
@@ -459,7 +484,7 @@ test.describe('GET /api/tickets search (q)', () => {
       const plain = await createTicketViaWebhook(request, 'plain')
       await signInViaApi(request, AGENT)
 
-      const ids = (await listTickets(request, { q: char })).map((t) => t.id)
+      const ids = (await listTickets(request, { q: char, pageSize: '100' })).map((t) => t.id)
       expect(ids).toContain(withChar.id)
       expect(ids).not.toContain(plain.id)
     })
@@ -488,7 +513,7 @@ test.describe('GET /api/tickets search (q)', () => {
 
     const atLimit = await request.get('/api/tickets', { params: { q: 'a'.repeat(200) } })
     expect(atLimit.status()).toBe(200)
-    expect(await atLimit.json()).toEqual({ tickets: expect.any(Array) })
+    expect(await atLimit.json()).toEqual({ tickets: expect.any(Array), total: expect.any(Number) })
   })
 
   test('a repeated q param gets 400 instead of searching for either value', async ({ request }) => {
@@ -496,5 +521,143 @@ test.describe('GET /api/tickets search (q)', () => {
     const res = await request.get('/api/tickets?q=a&q=b')
     expect(res.status()).toBe(400)
     expect(await res.json()).toEqual({ error: 'q must be a single string' })
+  })
+})
+
+const PAGE_ERROR = 'page must be a positive integer'
+const PAGE_SIZE_ERROR = 'pageSize must be an integer from 1 to 100'
+
+// Creates one ticket per label, in the given order, each with the subject `<token> <label>`.
+async function createTicketsWithToken(request: APIRequestContext, token: string, labels: string[]) {
+  const created = []
+  for (const label of labels) {
+    created.push(await createTicketViaWebhook(request, label, { subject: `${token} ${label}` }))
+  }
+  return created
+}
+
+// Each test narrows the list with `q=<its own token>`, so `total` is exactly its own tickets.
+test.describe('GET /api/tickets pagination (page, pageSize)', () => {
+  test('401 without a session, with valid or invalid paging params', async ({ request }) => {
+    for (const url of ['/api/tickets?page=2&pageSize=5', '/api/tickets?page=0&pageSize=101', '/api/tickets?page=abc']) {
+      const res = await request.get(url)
+      expect(res.status(), url).toBe(401)
+      expect(await res.json()).toEqual({ error: 'Unauthorized' })
+    }
+  })
+
+  test('pageSize=2 splits 5 tickets into pages of 2, 2 and 1 that together equal the unpaginated list', async ({ request }) => {
+    const token = `pages${uniqueSuffix()}`
+    const created = await createTicketsWithToken(request, token, ['one', 'two', 'three', 'four', 'five'])
+    await signInViaApi(request, AGENT)
+
+    const full = await getTicketPage(request, { q: token })
+    expect(full.total).toBe(5)
+    const fullIds = full.tickets.map((t) => t.id)
+    // Newest first.
+    expect(fullIds).toEqual(created.map((t) => t.id).reverse())
+
+    const pages = []
+    for (const page of ['1', '2', '3']) {
+      const res = await getTicketPage(request, { q: token, pageSize: '2', page })
+      expect(res.total, `page ${page}`).toBe(5)
+      pages.push(res.tickets.map((t) => t.id))
+    }
+    expect(pages.map((ids) => ids.length)).toEqual([2, 2, 1])
+    const joined = pages.flat()
+    expect(new Set(joined).size).toBe(joined.length)
+    expect(joined).toEqual(fullIds)
+  })
+
+  test('pagination with sortBy=subject&sortOrder=asc returns consecutive slices of the sorted order', async ({ request }) => {
+    const token = `pagesort${uniqueSuffix()}`
+    // Created out of alphabetical order, so creation order can't produce the expected result.
+    const [d, b, e, a, c] = await createTicketsWithToken(request, token, ['D', 'B', 'E', 'A', 'C'])
+    await signInViaApi(request, AGENT)
+
+    const sort = { q: token, sortBy: 'subject', sortOrder: 'asc' }
+    const sortedIds = [a.id, b.id, c.id, d.id, e.id]
+    expect((await listTickets(request, sort)).map((t) => t.id)).toEqual(sortedIds)
+
+    const pages = []
+    for (const page of ['1', '2', '3']) {
+      const res = await getTicketPage(request, { ...sort, pageSize: '2', page })
+      expect(res.total, `page ${page}`).toBe(5)
+      pages.push(res.tickets.map((t) => t.id))
+    }
+    expect(pages).toEqual([[a.id, b.id], [c.id, d.id], [e.id]])
+  })
+
+  test('a page past the end returns no tickets and the real total', async ({ request }) => {
+    const token = `pastend${uniqueSuffix()}`
+    await createTicketsWithToken(request, token, ['one', 'two', 'three', 'four', 'five'])
+    await signInViaApi(request, AGENT)
+
+    expect(await getTicketPage(request, { q: token, pageSize: '2', page: '4' })).toEqual({ tickets: [], total: 5 })
+  })
+
+  test('total counts only tickets matching the filters', async ({ request }) => {
+    const token = `total${uniqueSuffix()}`
+    const [ticket] = await createTicketsWithToken(request, token, ['only'])
+    await signInViaApi(request, ADMIN)
+
+    const matching = await getTicketPage(request, { q: token })
+    expect(matching.total).toBe(1)
+    expect(matching.tickets.map((t) => t.id)).toEqual([ticket.id])
+
+    expect(await getTicketPage(request, { q: `nomatch${uniqueSuffix()}` })).toEqual({ tickets: [], total: 0 })
+    expect(await getTicketPage(request, { q: token, status: 'resolved' })).toEqual({ tickets: [], total: 0 })
+  })
+
+  test('without pageSize a page holds at most 10 tickets and total is the full count', async ({ request }) => {
+    // DEFAULT_TICKET_PAGE_SIZE in core/src/schemas/tickets.ts. Restated because the root tsconfig
+    // can't resolve `core` (not a root dependency, and its extensionless imports fail under nodenext).
+    const defaultPageSize = 10
+    await createTicketViaWebhook(request)
+    await signInViaApi(request, AGENT)
+
+    const page = await getTicketPage(request, {})
+    expect(page.total).toBeGreaterThan(0)
+    // Exactly the default whenever the database holds more tickets than that.
+    expect(page.tickets.length).toBe(Math.min(page.total, defaultPageSize))
+
+    // Same as asking for the default pageSize explicitly; a bigger page reports the same total.
+    const explicit = await getTicketPage(request, { pageSize: String(defaultPageSize) })
+    expect(explicit.tickets.map((t) => t.id)).toEqual(page.tickets.map((t) => t.id))
+    const bigger = await getTicketPage(request, { pageSize: '100' })
+    expect(bigger.total).toBe(page.total)
+    expect(bigger.tickets.length).toBe(Math.min(page.total, 100))
+  })
+
+  const invalid: [string, string][] = [
+    ['page=0', PAGE_ERROR],
+    ['page=-1', PAGE_ERROR],
+    ['page=abc', PAGE_ERROR],
+    ['page=1.5', PAGE_ERROR],
+    ['page=', PAGE_ERROR],
+    ['page=1&page=2', PAGE_ERROR],
+    ['page=1000001', 'page is too large'],
+    ['pageSize=0', PAGE_SIZE_ERROR],
+    ['pageSize=101', PAGE_SIZE_ERROR],
+    ['pageSize=abc', PAGE_SIZE_ERROR],
+    ['pageSize=2&pageSize=3', PAGE_SIZE_ERROR],
+  ]
+  for (const [query, error] of invalid) {
+    test(`${query} gets 400 ${JSON.stringify(error)}`, async ({ request }) => {
+      await signInViaApi(request, AGENT)
+      const res = await request.get(`/api/tickets?${query}`)
+      expect(res.status()).toBe(400)
+      expect(await res.json()).toEqual({ error })
+    })
+  }
+
+  test('pageSize=100 and page=1000000 (the maximums) get 200', async ({ request }) => {
+    await signInViaApi(request, AGENT)
+
+    const maxSize = await getTicketPage(request, { pageSize: '100' })
+    expect(maxSize.tickets.length).toBeLessThanOrEqual(100)
+
+    const maxPage = await getTicketPage(request, { page: '1000000' })
+    expect(maxPage).toEqual({ tickets: [], total: expect.any(Number) })
   })
 })
