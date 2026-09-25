@@ -2,9 +2,10 @@
 
 ## Last run
 
-- **Date:** 2026-09-24
-- **Discovered (`--list`):** 88 tests in 7 files (api-auth 16, login 6, routing 5, session 7, tickets 15, users 22, webhook 17)
-- **Result:** 88 passed, 0 failed, 43.6s (chromium).
+- **Date:** 2026-09-25
+- **Discovered (`--list`):** 125 tests in 7 files (api-auth 16, login 6, routing 5, session 7, tickets 52, users 22, webhook 17)
+- **Result:** 125 passed, 0 failed, 30.2s (chromium).
+- **Before that change (2026-09-25):** 109 passed, 0 failed, 33.3s (chromium).
 
 ## tests/login.spec.ts
 
@@ -113,6 +114,34 @@ Sorting (`sortBy`, `sortOrder` query params):
 - `sortBy=category` in both directions returns 200, the test's three (unclassified, `category` null) tickets are newest first.
 - `sortBy=status` in both directions returns 200.
 
+Filtering (`status`, `category` query params). The webhook creates only open, unclassified tickets, so each test checks that a filter keeps or drops the test's own ticket and that every returned row matches; other values may return an empty list.
+
+- Without a session, both valid and invalid filter params get 401 `{"error":"Unauthorized"}`.
+- `status=open` lists the new ticket, and every row has status `open`.
+- `category=unclassified` lists the new ticket, and every row has `category` null.
+- `status=resolved` and `status=closed` (one test each) exclude the new ticket, and every row has that status.
+- `category=general_question`, `technical_question`, `refund_request` (one test each) exclude the new ticket, and every row has that category.
+- Combined: `status=open&category=unclassified` lists the ticket with every row matching both; `open` + `refund_request` and `resolved` + `unclassified` exclude it, with every row matching both.
+- `status=open&category=unclassified&sortBy=subject` with `asc` and `desc` (one test each): three tickets created B, C, A are listed A, B, C or C, B, A, and every row matches the filters.
+- `status=pending`, `Open` (case-sensitive), `unclassified` (a category value) and an empty `status=` (one test each) get 400 `{"error":"status must be one of: open, resolved, closed"}`.
+- `category=billing`, `Refund_Request`, `open` (a status value) and an empty `category=` (one test each) get 400 `{"error":"category must be one of: general_question, technical_question, refund_request, unclassified"}`.
+- A repeated `status=open&status=closed` gets 400 with the status message (Express parses it as an array).
+- An invalid category together with a valid sort gets 400 with the category message.
+
+Search (`q` query param). Each test searches for a token unique to it, so the matching set is exactly its own tickets.
+
+- Without a session, a valid `q`, a 201-character `q` and a repeated `q` all get 401 `{"error":"Unauthorized"}`.
+- A token only in the `subject`, `senderName`, `senderEmail` or `body` (one test each) returns exactly that ticket and not a control ticket without it. For all but `body` (not in the list response), every row holds the token in a listed field.
+- An upper-cased and a lower-cased form of a mixed-case subject token both find the ticket.
+- Leading and trailing spaces around the token are trimmed.
+- `q=%20%20` and an empty `q=` return the same ids, in the same order, as no `q`.
+- `q` + `status=open` + `sortBy=subject` with `asc` and `desc` (one test each): three tickets created B, C, A come back as exactly A, B, C or C, B, A; a control ticket is excluded; the same query with `status=resolved` returns `[]`.
+- A subject token `50%_off-<suffix>` is found by that exact text, and a decoy `50ABoff-<suffix>` (which the unescaped wildcards would match) is not.
+- `q=%` and `q=_` (one test each) include a ticket with that character in its subject and exclude a new ticket without it.
+- A token with a backslash (`back\slash-<suffix>`) matches literally, and a decoy `backslash-<suffix>` (it would match if the backslash weren't escaped, since `\s` in LIKE means a plain `s`) is not.
+- A 201-character `q` gets 400 `{"error":"q is too long"}`; exactly 200 characters gets 200.
+- A repeated `q=a&q=b` gets 400 `{"error":"q must be a single string"}`.
+
 ## Harness helpers
 
 - **`fixtures/auth.ts`:**
@@ -130,7 +159,7 @@ Sorting (`sortBy`, `sortOrder` query params):
   - `deleteUserViaApi(request, id)` soft-deletes a user through DELETE `/api/users/:id` (signed in as the admin) and asserts 204.
   - `users.spec.ts` keeps its own `userRow`, `openNewUserDialog`, `submitNewUser`, `openEditDialog`, `openDeleteDialog` and `postSignIn`, which only it uses.
 - **`fixtures/webhook.ts`:** `inboundSecret()` reads `INBOUND_EMAIL_SECRET` from `server/.env.test` (the file `start:test` loads) with `node:util`'s `parseEnv`, so the tests and the server share one value. It reads lazily and throws a clear error if the value is missing, so other specs still load. `webhook.spec.ts` keeps its own `validEmail` (unique sender per call), `uniqueMessageId`, `postInbound`, `expectUnauthorized` and `expectCreated`.
-- **`fixtures/tickets.ts`:** `createTicketViaWebhook(request, label, overrides?)` posts a unique email (subject `E2E <label> <suffix>`, unique sender) to the inbound webhook with the secret, asserts 201 and returns the ticket's `id`, `subject`, `senderName` and `senderEmail`. `overrides` sets `subject` or `senderName` exactly, for the sorting tests. It needs no session. `tickets.spec.ts` keeps its own `listTickets(request, params)` (GET with sort params, asserts 200) and `expectInOrder(tickets, ids)` (the ids are listed in that relative order).
+- **`fixtures/tickets.ts`:** `createTicketViaWebhook(request, label, overrides?)` posts a unique email (subject `E2E <label> <suffix>`, unique sender, body `Please help.`) to the inbound webhook with the secret, asserts 201 and returns the ticket's `id`, `subject`, `senderName` and `senderEmail`. `overrides` sets `subject`, `senderName`, `senderEmail` or `body` exactly, for the sorting and search tests. The defaults contain no `%`, `_` or `\`. It needs no session. `tickets.spec.ts` keeps its own `listTickets(request, params)` (GET with sort, filter and search params, asserts 200), `expectInOrder(tickets, ids)` (the ids are listed in that relative order), `searchOverride(field, token)` (puts a token into one field) and `expectAllContain(tickets, text)` (every row holds the text in subject, sender name or email).
 - Helpers are plain exported functions: no page objects and no `test.extend` fixtures.
 - **`global-setup.ts`:** runs the test-DB guard, `prisma migrate reset --force`, the admin seed, then `seed-agent.ts`. Each run starts with two users: the admin and the agent.
 - **`seed-agent.ts`:** creates the agent through Better Auth's `internalAdapter`, like `prisma/seed.ts` creates the admin. It reads the credentials from `E2E_AGENT_*` environment variables and skips if the agent already exists.
@@ -153,8 +182,11 @@ Sorting (`sortBy`, `sortOrder` query params):
 - **Stored webhook tickets, beyond the list fields:** GET `/api/tickets` now shows subject, sender, status and category (checked in `tickets.spec.ts`), but not `body`, `bodyHTML`, `messageId` or `assignedToId`, so those can't be checked as stored. `webhook.spec.ts` still checks only responses: that a missing or blank subject is listed as `"(no subject)"`, that a dedupe adds no second row, and that a 400 creates nothing could now be checked through the list but haven't been added.
 - **The `/tickets` page UI:** the table's headers, rows and order, the category label, the empty, loading and error states, and the Tickets navbar link are covered by the Vitest component tests (`client/src/pages/TicketsPage.test.tsx`, `client/src/components/Navbar.test.tsx`), not E2E. The client redirect of an unauthenticated `/tickets` visit and the navbar link navigating there are covered in `client/src/App.test.tsx`; the server side is covered by the GET `/api/tickets` 401. E2E keeps the API tests, which need the real server and database.
 - **Sort order of status and category values:** the webhook creates only `open`, unclassified tickets and no endpoint changes status or category, so the enum declaration order (open < resolved < closed; general_question < technical_question < refund_request) and nulls-last for category can't be observed. Only the 200 and the newest-first tie-break are checked. Covering them needs ticket update endpoints (or classification) to exist.
+- **Filtering on statuses and categories that exist:** no ticket in `helpdesk_test` is ever resolved, closed or classified (the webhook creates only open, unclassified tickets, no endpoint changes them, and the tests don't write to the DB directly). So `status=resolved|closed` and each real category are only shown to exclude open, unclassified tickets, not to include matching ones, and combined filters are never checked against a mixed set. A test-only seed of varied tickets in global setup (like `seed-agent.ts`, via Prisma) would cover this now; ticket update endpoints would make it possible through the API later.
 - **Collation-sensitive subject order:** the sorting tests use subjects that differ only in a final capital letter, so they pass under any Postgres collation; mixed case, accents and punctuation aren't tested.
 - **The P2002 fallback specifically:** the concurrent test fires two posts at once and checks the outcome (one 201, one 200, same id), but can't force which path answers the 200, the `findUnique` lookup or the unique-constraint catch.
+- **Search ranking, multi-word and accent handling:** `q` is one case-insensitive substring over four fields; tokens aren't split, results aren't ranked, and accent-insensitive matching isn't tested (Postgres `ILIKE` doesn't fold accents).
+- **Search on `body` rows:** the list doesn't return `body`, so the body-search test can only check which ids come back, not the matched text.
 - **Not built yet:** restoring a deleted user, ticket CRUD beyond webhook creation and the list (detail, update, assignment), AI features, email, and the dashboard.
 
 ## Open questions
@@ -164,4 +196,6 @@ Sorting (`sortBy`, `sortOrder` query params):
 - **Webhook storage is only partly observable:** GET `/api/tickets` exposes the list fields; the body fields need a ticket detail endpoint (planned with ticket CRUD).
 - **The ticket list is unpaginated:** GET `/api/tickets` returns every ticket. `tickets.spec.ts` looks tickets up in the full list, so adding pagination will need those tests updated.
 - **Subject and sender sorting follow the database collation:** the order of mixed-case or accented values depends on `helpdesk_test`'s collation, which may differ from production's. Not asserted.
+- **Varied-ticket seed for E2E:** whether to add a test-only seed of tickets with every status and category to global setup, so the filter tests (and the status/category sort order) can check inclusion, not just exclusion. Not added.
+- **Search is a sequential `ILIKE` scan:** the route comment says so; fine at this size, a trigram index or full-text search if the table grows. Not something a test checks.
 - **App changes needed:** none to run the current suite. Every locator uses an accessible label, role or text.

@@ -12,6 +12,7 @@ import { TicketStatus } from 'core/constants/ticketStatus'
 import type { TicketListQuery, TicketSortField } from 'core/schemas/tickets'
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react'
 import { useState } from 'react'
+import type { TicketFilterValues } from '@/components/TicketFilters.tsx'
 import { Button } from '@/components/ui/button.tsx'
 import { Skeleton } from '@/components/ui/skeleton.tsx'
 import {
@@ -22,6 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table.tsx'
+import { categoryLabels } from '@/lib/ticketLabels.ts'
 
 export type Ticket = {
   id: number
@@ -31,12 +33,6 @@ export type Ticket = {
   status: TicketStatus
   category: TicketCategory | null
   createdAt: string
-}
-
-const categoryLabels: Record<TicketCategory, string> = {
-  [TicketCategory.general_question]: 'General question',
-  [TicketCategory.technical_question]: 'Technical question',
-  [TicketCategory.refund_request]: 'Refund request',
 }
 
 const features = tableFeatures({ rowSortingFeature })
@@ -81,12 +77,16 @@ const columns = columnHelper.columns([
 
 const skeletonWidths = ['w-56', 'w-40', 'w-14', 'w-28', 'w-32']
 
-// Sorting happens on the server: the table only tracks which column is sorted and
-// renders the rows in the order the API returns them.
-function TicketsTable() {
+// Sorting and filtering happen on the server: the table only tracks which column is sorted
+// and renders the rows the API returns, in its order.
+function TicketsTable({ filters }: { filters: TicketFilterValues }) {
   const [sorting, setSorting] = useState<SortingState>([{ id: 'createdAt', desc: true }])
   const { id, desc } = sorting[0]!
-  const params: TicketListQuery = { sortBy: id as TicketSortField, sortOrder: desc ? 'desc' : 'asc' }
+  const params: TicketListQuery = {
+    sortBy: id as TicketSortField,
+    sortOrder: desc ? 'desc' : 'asc',
+    ...filters,
+  }
 
   const { data: tickets, error, isPlaceholderData } = useQuery({
     queryKey: ['tickets', params],
@@ -115,7 +115,11 @@ function TicketsTable() {
       Couldn't load tickets: {errorMessage(error)}
     </p>
   ) : tickets?.length === 0 ? (
-    <p className="text-muted-foreground">No tickets yet.</p>
+    <p className="text-muted-foreground">
+      {filters.status || filters.category || filters.q
+        ? 'No tickets match these filters.'
+        : 'No tickets yet.'}
+    </p>
   ) : (
     <Table aria-busy={!tickets || isPlaceholderData}>
       <TableHeader>

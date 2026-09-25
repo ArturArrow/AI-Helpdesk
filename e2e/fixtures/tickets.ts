@@ -11,11 +11,11 @@ export type CreatedTicket = {
 
 // Creates a ticket through the inbound-email webhook (the only way to create one so far).
 // Subject and sender are unique per call, so tests can find their own rows among other specs'.
-// `overrides` sets the subject or sender name exactly, for tests that sort on them.
+// `overrides` sets any of the four fields exactly, for tests that sort or search on them.
 export async function createTicketViaWebhook(
   request: APIRequestContext,
   label = 'ticket',
-  overrides: { subject?: string; senderName?: string } = {},
+  overrides: { subject?: string; senderName?: string; senderEmail?: string; body?: string } = {},
 ): Promise<CreatedTicket> {
   const suffix = uniqueSuffix()
   const data = {

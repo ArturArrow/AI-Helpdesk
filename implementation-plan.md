@@ -31,10 +31,10 @@
 
 - [x] `Ticket` model (`schema.prisma`: status/category enums, `assignedToId`) — added with the inbound webhook below
 - [ ] Implement create ticket API endpoint
-- [ ] Implement list tickets API endpoint (with filtering by status and category, sorting)
+- [x] Implement list tickets API endpoint (with filtering by status and category, sorting) — `GET /api/tickets?status=&category=&sortBy=&sortOrder=`
 - [ ] Implement get ticket API endpoint
 - [ ] Implement update ticket API endpoint (change status, assign agent)
-- [ ] Create ticket list page with filtering and sorting — list and server-side sorting done (`/tickets`, `GET /api/tickets?sortBy=&sortOrder=`); filtering still open
+- [x] Create ticket list page with filtering and sorting — `/tickets`, TanStack Table with server-side sorting, status/category filters in the URL
 - [ ] Create ticket detail page
 
 ## Phase 5: AI Features
