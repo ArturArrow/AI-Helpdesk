@@ -48,7 +48,7 @@ function TicketDetailPage() {
       ) : ticket ? (
         <>
           <div className="space-y-2">
-            <h1 className="text-2xl font-semibold break-words">{ticket.subject}</h1>
+            <h1 className="text-2xl font-semibold wrap-break-word">{ticket.subject}</h1>
             <p className="text-sm">
               {statusLabels[ticket.status]} ·{' '}
               {ticket.category ? (
@@ -79,7 +79,7 @@ function TicketDetailPage() {
             </div>
           </dl>
           <Card>
-            <CardContent className="text-sm break-words whitespace-pre-wrap">{ticket.body}</CardContent>
+            <CardContent className="text-sm wrap-break-word whitespace-pre-wrap">{ticket.body}</CardContent>
           </Card>
         </>
       ) : (

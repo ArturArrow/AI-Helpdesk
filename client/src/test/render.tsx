@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, type RenderOptions } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, type InitialEntry } from 'react-router'
 
 // A fresh client per call, so no cached result leaks between tests; no retries, as in main.tsx.
 export function renderWithQuery(ui: ReactNode, options?: Omit<RenderOptions, 'wrapper'>) {
@@ -14,8 +14,8 @@ export function renderWithQuery(ui: ReactNode, options?: Omit<RenderOptions, 'wr
   })
 }
 
-// renderWithQuery inside a MemoryRouter that starts at `route`. Pass <Routes> as `ui` to
-// observe navigation.
-export function renderWithRouter(ui: ReactNode, route = '/') {
+// renderWithQuery inside a MemoryRouter that starts at `route` (a path, or a location object
+// when the test needs `state`). Pass <Routes> as `ui` to observe navigation.
+export function renderWithRouter(ui: ReactNode, route: InitialEntry = '/') {
   return renderWithQuery(<MemoryRouter initialEntries={[route]}>{ui}</MemoryRouter>)
 }

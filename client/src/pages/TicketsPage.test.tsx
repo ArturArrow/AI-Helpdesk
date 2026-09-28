@@ -4,7 +4,7 @@ import axios, { AxiosError, type AxiosRequestConfig } from 'axios'
 import { TicketCategory } from 'core/constants/ticketCategory'
 import { TicketStatus } from 'core/constants/ticketStatus'
 import { DEFAULT_TICKET_PAGE_SIZE } from 'core/schemas/tickets'
-import { useLocation, useNavigationType } from 'react-router'
+import { Route, Routes, useLocation, useNavigationType } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Ticket } from '@/components/TicketsTable.tsx'
 import { httpError } from '@/test/http.ts'
@@ -212,6 +212,72 @@ describe('TicketsPage', () => {
     renderWithRouter(<TicketsPage />, '/tickets')
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/^Couldn't load tickets: Request failed$/)
+  })
+
+  describe('opening a ticket', () => {
+    // Stands in for the detail page: where the link led and the list URL it carried along.
+    function DetailProbe() {
+      const location = useLocation()
+      const from = (location.state as { from?: string } | null)?.from
+      return (
+        <>
+          <output aria-label="Detail path">{location.pathname}</output>
+          <output aria-label="Came from">{from ?? 'none'}</output>
+        </>
+      )
+    }
+
+    function renderWithDetail(route: string) {
+      renderWithRouter(
+        <Routes>
+          <Route path="/tickets" element={<TicketsPage />} />
+          <Route path="/tickets/:id" element={<DetailProbe />} />
+        </Routes>,
+        route,
+      )
+    }
+
+    it('links each subject to its ticket page', async () => {
+      mockGet().mockResolvedValue(ticketPage(tickets))
+      renderWithRouter(<TicketsPage />, '/tickets')
+      await screen.findByRole('cell', { name: 'Refund for order 1234' })
+
+      const [, ...bodyRows] = within(screen.getByRole('table')).getAllByRole('row')
+      expect(bodyRows).toHaveLength(tickets.length)
+      bodyRows.forEach((row, i) => {
+        const link = within(row).getByRole('link', { name: tickets[i]!.subject })
+        expect(link).toHaveAttribute('href', `/tickets/${tickets[i]!.id}`)
+      })
+    })
+
+    it('opens the ticket and passes the list URL with its filters, sort and page as state.from', async () => {
+      const user = userEvent.setup()
+      mockGet().mockResolvedValue(ticketPage(tickets, 25))
+      const listUrl = '/tickets?status=open&category=refund_request&q=refund&sortBy=subject&sortOrder=asc&page=2'
+      renderWithDetail(listUrl)
+
+      await user.click(await screen.findByRole('link', { name: 'App crashes on start' }))
+
+      expect((await screen.findByRole('status', { name: 'Detail path' })).textContent).toBe('/tickets/3')
+      expect(screen.getByRole('status', { name: 'Came from' }).textContent).toBe(listUrl)
+      expect(screen.queryByRole('table')).not.toBeInTheDocument()
+    })
+
+    it('passes the list URL as it is at the time of the click, after a re-sort', async () => {
+      const user = userEvent.setup()
+      mockGet().mockResolvedValue(ticketPage(tickets))
+      renderWithDetail('/tickets')
+      await screen.findByRole('cell', { name: 'Refund for order 1234' })
+
+      await user.click(screen.getByRole('button', { name: 'Subject' }))
+      await waitFor(() =>
+        expect(screen.getByRole('columnheader', { name: 'Subject' })).toHaveAttribute('aria-sort', 'ascending'),
+      )
+      await user.click(screen.getByRole('link', { name: 'Something odd' }))
+
+      expect((await screen.findByRole('status', { name: 'Detail path' })).textContent).toBe('/tickets/1')
+      expect(screen.getByRole('status', { name: 'Came from' }).textContent).toBe('/tickets?sortBy=subject&sortOrder=asc')
+    })
   })
 
   describe('sorting', () => {

@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 import { ADMIN, AGENT, signInViaApi } from '../fixtures/auth.js'
-import { createTicketViaWebhook } from '../fixtures/tickets.js'
-import { uniqueSuffix } from '../fixtures/users.js'
+import { assignTicketInDb, createTicketViaWebhook } from '../fixtures/tickets.js'
+import { createUserViaApi, deleteUserViaApi, uniqueSuffix } from '../fixtures/users.js'
 import { inboundSecret } from '../fixtures/webhook.js'
 
 // Other specs create tickets in the same database and the list is paginated (10 per page by
@@ -659,5 +659,116 @@ test.describe('GET /api/tickets pagination (page, pageSize)', () => {
 
     const maxPage = await getTicketPage(request, { page: '1000000' })
     expect(maxPage).toEqual({ tickets: [], total: expect.any(Number) })
+  })
+})
+
+const TICKET_ID_ERROR = 'id must be a positive integer'
+const DETAIL_KEYS = ['assignedTo', 'body', 'category', 'createdAt', 'id', 'senderEmail', 'senderName', 'status', 'subject', 'updatedAt']
+
+test.describe('GET /api/tickets/:id', () => {
+  test('401 without a session, for an existing and an invalid id', async ({ request }) => {
+    const ticket = await createTicketViaWebhook(request, 'detail-401')
+
+    for (const id of [String(ticket.id), 'abc']) {
+      const res = await request.get(`/api/tickets/${id}`)
+      expect(res.status(), `id ${id}`).toBe(401)
+      expect(await res.json()).toEqual({ error: 'Unauthorized' })
+    }
+  })
+
+  for (const user of [AGENT, ADMIN]) {
+    test(`200 for the ${user.name.toLowerCase()}`, async ({ request }) => {
+      const ticket = await createTicketViaWebhook(request, 'detail-read')
+      await signInViaApi(request, user)
+
+      const res = await request.get(`/api/tickets/${ticket.id}`)
+      expect(res.status()).toBe(200)
+      const body = await res.json()
+      expect(body.ticket).toMatchObject({ id: ticket.id, subject: ticket.subject })
+    })
+  }
+
+  for (const id of ['abc', '0', '-1', '1.5', '2147483648']) {
+    test(`id ${id} gets 400 ${JSON.stringify(TICKET_ID_ERROR)}`, async ({ request }) => {
+      await signInViaApi(request, AGENT)
+      const res = await request.get(`/api/tickets/${id}`)
+      expect(res.status()).toBe(400)
+      expect(await res.json()).toEqual({ error: TICKET_ID_ERROR })
+    })
+  }
+
+  test('a valid but nonexistent id (2147483647, the int4 maximum) gets 404', async ({ request }) => {
+    await signInViaApi(request, AGENT)
+    const res = await request.get('/api/tickets/2147483647')
+    expect(res.status()).toBe(404)
+    expect(await res.json()).toEqual({ error: 'Ticket not found' })
+  })
+
+  test('returns exactly the detail fields, with assignedTo null and no bodyHTML, messageId or assignedToId', async ({ request }) => {
+    const suffix = uniqueSuffix()
+    const created = await request.post('/api/webhooks/inbound-email', {
+      headers: { 'X-Inbound-Secret': inboundSecret() },
+      data: {
+        subject: `E2E detail ${suffix}`,
+        senderName: `Customer ${suffix}`,
+        senderEmail: `customer-${suffix}@example.com`,
+        body: 'Plain body',
+        bodyHTML: '<p>HTML body</p>',
+        messageId: `<detail-${suffix}@example.com>`,
+      },
+    })
+    expect(created.status()).toBe(201)
+    const { ticket: { id } } = await created.json()
+
+    await signInViaApi(request, AGENT)
+    const res = await request.get(`/api/tickets/${id}`)
+    expect(res.status()).toBe(200)
+    const body = await res.json()
+
+    expect(Object.keys(body)).toEqual(['ticket'])
+    expect(Object.keys(body.ticket).sort()).toEqual(DETAIL_KEYS)
+    expect(body.ticket).toEqual({
+      id,
+      subject: `E2E detail ${suffix}`,
+      senderName: `Customer ${suffix}`,
+      senderEmail: `customer-${suffix}@example.com`,
+      status: 'open',
+      category: null,
+      createdAt: expect.any(String),
+      updatedAt: expect.any(String),
+      body: 'Plain body',
+      assignedTo: null,
+    })
+    expect(body.ticket).not.toHaveProperty('bodyHTML')
+    expect(body.ticket).not.toHaveProperty('messageId')
+    expect(body.ticket).not.toHaveProperty('assignedToId')
+    expect(Number.isNaN(Date.parse(body.ticket.createdAt))).toBe(false)
+    expect(Number.isNaN(Date.parse(body.ticket.updatedAt))).toBe(false)
+  })
+
+  test('an assigned ticket has assignedTo { id, name } of the agent', async ({ request }) => {
+    await signInViaApi(request, ADMIN)
+    const agent = await createUserViaApi(request, 'assignee')
+    const ticket = await createTicketViaWebhook(request, 'detail-assigned')
+    assignTicketInDb(ticket.id, agent.id)
+
+    await signInViaApi(request, AGENT)
+    const res = await request.get(`/api/tickets/${ticket.id}`)
+    expect(res.status()).toBe(200)
+    const body = await res.json()
+    expect(body.ticket.assignedTo).toEqual({ id: agent.id, name: agent.name })
+    expect(body.ticket).not.toHaveProperty('assignedToId')
+  })
+
+  test('a soft-deleted assignee is still shown in assignedTo', async ({ request }) => {
+    await signInViaApi(request, ADMIN)
+    const agent = await createUserViaApi(request, 'deleted-assignee')
+    const ticket = await createTicketViaWebhook(request, 'detail-deleted-assignee')
+    assignTicketInDb(ticket.id, agent.id)
+    await deleteUserViaApi(request, agent.id)
+
+    const res = await request.get(`/api/tickets/${ticket.id}`)
+    expect(res.status()).toBe(200)
+    expect((await res.json()).ticket.assignedTo).toEqual({ id: agent.id, name: agent.name })
   })
 })

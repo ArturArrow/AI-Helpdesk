@@ -2,10 +2,9 @@
 
 ## Last run
 
-- **Date:** 2026-09-25
-- **Discovered (`--list`):** 143 tests in 7 files (api-auth 16, login 6, routing 5, session 7, tickets 70, users 22, webhook 17)
-- **Result:** not run since the page-size change (default `pageSize` 20 -> 10).
-- **Before that change (2026-09-25):** 143 passed, 0 failed, 28.0s (chromium).
+- **Date:** 2026-10-02
+- **Discovered (`--list`):** 155 tests in 7 files (api-auth 16, login 6, routing 5, session 7, tickets 82, users 22, webhook 17)
+- **Result:** 155 passed, 0 failed, 40.3s (chromium).
 
 ## tests/login.spec.ts
 
@@ -93,7 +92,7 @@ POST `/api/webhooks/inbound-email`. The route returns only `{"ticket":{"id":<num
 
 ## tests/tickets.spec.ts
 
-GET `/api/tickets` only. Other specs create tickets too and the list is paginated (10 by default, `DEFAULT_TICKET_PAGE_SIZE`), so each test narrows the list to its own tickets with `q=<unique token>`, or uses `pageSize=100` when a check covers every row. They compare relative order, never positions or counts, except where `q` makes the matching set exactly the test's tickets.
+GET `/api/tickets` and GET `/api/tickets/:id`, at the API only (the page UI is in Vitest). Other specs create tickets too and the list is paginated (10 by default, `DEFAULT_TICKET_PAGE_SIZE`), so each test narrows the list to its own tickets with `q=<unique token>`, or uses `pageSize=100` when a check covers every row. They compare relative order, never positions or counts, except where `q` makes the matching set exactly the test's tickets.
 
 - GET `/api/tickets` without a session gets 401 `{"error":"Unauthorized"}`.
 - The agent gets 200 and the list holds a ticket just created through the webhook.
@@ -153,6 +152,16 @@ Pagination (`page`, `pageSize` query params). Each test narrows with its own `q`
 - 400 `{"error":"page must be a positive integer"}` for `page=0`, `-1`, `abc`, `1.5`, an empty `page=` and a repeated `page=1&page=2`; 400 `{"error":"page is too large"}` for `page=1000001`; 400 `{"error":"pageSize must be an integer from 1 to 100"}` for `pageSize=0`, `101`, `abc` and a repeated `pageSize` (one test each).
 - `pageSize=100` gets 200 with at most 100 tickets, and `page=1000000` gets 200 with `tickets: []` and a numeric `total`.
 
+Detail (GET `/api/tickets/:id`):
+
+- Without a session, both an existing id and `abc` get 401 `{"error":"Unauthorized"}` (auth runs before validation and lookup).
+- The agent and the admin (one test each) get 200 with the ticket just created through the webhook.
+- `abc`, `0`, `-1`, `1.5` and `2147483648` (above int4) get 400 `{"error":"id must be a positive integer"}` (one test each).
+- `2147483647` (the int4 maximum, valid but nonexistent) gets 404 `{"error":"Ticket not found"}`.
+- A webhook ticket sent with `bodyHTML` and a `messageId` comes back as exactly `{ ticket }` with `id`, `subject`, `senderName`, `senderEmail`, `status` `open`, `category` null, parseable `createdAt` and `updatedAt`, `body` and `assignedTo` null; no `bodyHTML`, `messageId` or `assignedToId`.
+- A ticket assigned (in the DB) to an admin-created agent returns `assignedTo: { id, name }` of that agent, read by the seeded agent, with no `assignedToId`.
+- After that assignee is soft-deleted, `assignedTo` still shows their `{ id, name }`.
+
 ## Harness helpers
 
 - **`fixtures/auth.ts`:**
@@ -170,9 +179,10 @@ Pagination (`page`, `pageSize` query params). Each test narrows with its own `q`
   - `deleteUserViaApi(request, id)` soft-deletes a user through DELETE `/api/users/:id` (signed in as the admin) and asserts 204.
   - `users.spec.ts` keeps its own `userRow`, `openNewUserDialog`, `submitNewUser`, `openEditDialog`, `openDeleteDialog` and `postSignIn`, which only it uses.
 - **`fixtures/webhook.ts`:** `inboundSecret()` reads `INBOUND_EMAIL_SECRET` from `server/.env.test` (the file `start:test` loads) with `node:util`'s `parseEnv`, so the tests and the server share one value. It reads lazily and throws a clear error if the value is missing, so other specs still load. `webhook.spec.ts` keeps its own `validEmail` (unique sender per call), `uniqueMessageId`, `postInbound`, `expectUnauthorized` and `expectCreated`.
-- **`fixtures/tickets.ts`:** `createTicketViaWebhook(request, label, overrides?)` posts a unique email (subject `E2E <label> <suffix>`, unique sender, body `Please help.`) to the inbound webhook with the secret, asserts 201 and returns the ticket's `id`, `subject`, `senderName` and `senderEmail`. `overrides` sets `subject`, `senderName`, `senderEmail` or `body` exactly, for the sorting and search tests. The defaults contain no `%`, `_` or `\`. It needs no session. `tickets.spec.ts` keeps its own `getTicketPage(request, params)` (GET with sort, filter, search and paging params, asserts 200, returns `{ tickets, total }`), `listTickets(request, params)` (the same, returning only `tickets`), `expectInOrder(tickets, ids)` (the ids are listed in that relative order), `searchOverride(field, token)` (puts a token into one field) `expectAllContain(tickets, text)` (every row holds the text in subject, sender name or email), `expectRowsMatch(tickets, filters)` and `expectFilter(request, filters, id, subject, listed)` (the filter keeps or drops the ticket, and every row of a page of 100 matches), and `createTicketsWithToken(request, token, labels)` (one ticket per label, subject `<token> <label>`).
+- **`fixtures/tickets.ts`:** `createTicketViaWebhook(request, label, overrides?)` posts a unique email (subject `E2E <label> <suffix>`, unique sender, body `Please help.`) to the inbound webhook with the secret, asserts 201 and returns the ticket's `id`, `subject`, `senderName` and `senderEmail`. `overrides` sets `subject`, `senderName`, `senderEmail` or `body` exactly, for the sorting and search tests. The defaults contain no `%`, `_` or `\`. It needs no session. `assignTicketInDb(ticketId, assigneeId)` sets a ticket's `assignedToId` by running `e2e/assign-ticket.ts` from `server/` with only `.env.test` loaded (the same way global setup runs its steps), since no endpoint assigns tickets yet. `tickets.spec.ts` keeps its own `getTicketPage(request, params)` (GET with sort, filter, search and paging params, asserts 200, returns `{ tickets, total }`), `listTickets(request, params)` (the same, returning only `tickets`), `expectInOrder(tickets, ids)` (the ids are listed in that relative order), `searchOverride(field, token)` (puts a token into one field) `expectAllContain(tickets, text)` (every row holds the text in subject, sender name or email), `expectRowsMatch(tickets, filters)` and `expectFilter(request, filters, id, subject, listed)` (the filter keeps or drops the ticket, and every row of a page of 100 matches), and `createTicketsWithToken(request, token, labels)` (one ticket per label, subject `<token> <label>`).
 - Helpers are plain exported functions: no page objects and no `test.extend` fixtures.
 - **`global-setup.ts`:** runs the test-DB guard, `prisma migrate reset --force`, the admin seed, then `seed-agent.ts`. Each run starts with two users: the admin and the agent.
+- **`assign-ticket.ts`:** sets `assignedToId` on one ticket through the server's Prisma client (`E2E_TICKET_ID`, `E2E_ASSIGNEE_ID`). It refuses any `DATABASE_URL` not ending in `_test`, like `scripts/assert-test-db.ts`. It imports `db.ts` by a variable path, like `seed-agent.ts`.
 - **`seed-agent.ts`:** creates the agent through Better Auth's `internalAdapter`, like `prisma/seed.ts` creates the admin. It reads the credentials from `E2E_AGENT_*` environment variables and skips if the agent already exists.
 - **`global-teardown.ts`:** only logs. It leaves `helpdesk_test` intact for debugging.
 - Specs import helpers as `../fixtures/auth.js` (`global-setup.ts` as `./fixtures/auth.js`), because the root tsconfig rejects `.ts` import extensions (TS5097).
@@ -190,7 +200,7 @@ Pagination (`page`, `pageSize` query params). Each test narrows with its own `q`
 - **Editing a user's role:** PATCH accepts only name, email and password, so there is nothing to test.
 - **Deleting an admin through the UI:** admin rows have no delete button, so it's covered only at the API (403).
 - **The "Deleting…" pending state:** not tested; it would need holding the DELETE request.
-- **Stored webhook tickets, beyond the list fields:** GET `/api/tickets` now shows subject, sender, status and category (checked in `tickets.spec.ts`), but not `body`, `bodyHTML`, `messageId` or `assignedToId`, so those can't be checked as stored. `webhook.spec.ts` still checks only responses: that a missing or blank subject is listed as `"(no subject)"`, that a dedupe adds no second row, and that a 400 creates nothing could now be checked through the list but haven't been added.
+- **Stored webhook tickets, beyond the returned fields:** GET `/api/tickets/:id` returns `body` (checked in `tickets.spec.ts`), but never `bodyHTML` or `messageId`, so those can't be checked as stored. `webhook.spec.ts` still checks only responses: that a missing or blank subject is listed as `"(no subject)"`, that a dedupe adds no second row, and that a 400 creates nothing could now be checked through the list but haven't been added.
 - **The `/tickets` page UI:** the table's headers, rows and order, the category label, the empty, loading and error states, and the Tickets navbar link are covered by the Vitest component tests (`client/src/pages/TicketsPage.test.tsx`, `client/src/components/Navbar.test.tsx`), not E2E. The client redirect of an unauthenticated `/tickets` visit and the navbar link navigating there are covered in `client/src/App.test.tsx`; the server side is covered by the GET `/api/tickets` 401. E2E keeps the API tests, which need the real server and database.
 - **Sort order of status and category values:** the webhook creates only `open`, unclassified tickets and no endpoint changes status or category, so the enum declaration order (open < resolved < closed; general_question < technical_question < refund_request) and nulls-last for category can't be observed. Only the 200 and the newest-first tie-break are checked. Covering them needs ticket update endpoints (or classification) to exist.
 - **Filtering on statuses and categories that exist:** no ticket in `helpdesk_test` is ever resolved, closed or classified (the webhook creates only open, unclassified tickets, no endpoint changes them, and the tests don't write to the DB directly). So `status=resolved|closed` and each real category are only shown to exclude open, unclassified tickets, not to include matching ones, and combined filters are never checked against a mixed set. A test-only seed of varied tickets in global setup (like `seed-agent.ts`, via Prisma) would cover this now; ticket update endpoints would make it possible through the API later.
@@ -199,13 +209,16 @@ Pagination (`page`, `pageSize` query params). Each test narrows with its own `q`
 - **Pagination UI and the count/page consistency under concurrent writes:** the table's paging controls are covered by Vitest, not E2E. That `total` and the page come from one `$transaction` can't be observed from a serial test.
 - **Search ranking, multi-word and accent handling:** `q` is one case-insensitive substring over four fields; tokens aren't split, results aren't ranked, and accent-insensitive matching isn't tested (Postgres `ILIKE` doesn't fold accents).
 - **Search on `body` rows:** the list doesn't return `body`, so the body-search test can only check which ids come back, not the matched text.
-- **Not built yet:** restoring a deleted user, ticket CRUD beyond webhook creation and the list (detail, update, assignment), AI features, email, and the dashboard.
+- **Not built yet:** restoring a deleted user, ticket CRUD beyond webhook creation, the list and the detail (create, update, assignment through the API), AI features, email, and the dashboard.
 
 ## Open questions
 
 - **No return-to after login:** a user bounced from a deep link (e.g. `/users`) lands on `/` after signing in, not on the page they asked for. `routing.spec.ts` records this behaviour. If a return-to redirect is added, that test needs updating.
 - **A deleted user's email stays reserved:** POST and PATCH still see soft-deleted users, so the email can't be reused (409), and nothing in the UI shows why. `users.spec.ts` records this.
-- **Webhook storage is only partly observable:** GET `/api/tickets` exposes the list fields; the body fields need a ticket detail endpoint (planned with ticket CRUD).
+- **Webhook storage is only partly observable:** GET `/api/tickets/:id` exposes `body` but deliberately not `bodyHTML` (unsafe to render) or `messageId`, so those stay unchecked as stored.
+- **Assignment is written straight to the DB:** no endpoint assigns tickets, so `assignTicketInDb` sets `assignedToId` through Prisma in `helpdesk_test`. Once an assignment endpoint exists, the two `assignedTo` tests should use it instead.
+- **A soft-deleted assignee still shows on the ticket:** GET `/api/tickets/:id` doesn't filter `deletedAt` for `assignedTo` (by design, per the route comment). `tickets.spec.ts` records this.
+- **An `assignedToId` pointing at no user returns `assignedTo: null`:** the column has no foreign key, so a dangling id is indistinguishable from unassigned. Not tested.
 - **Resolved: the ticket list is paginated** (`page`, `pageSize`, `{ tickets, total }`), and `tickets.spec.ts` now narrows each list with `q` or `pageSize=100`.
 - **"Every row matches" checks cover one page:** filter and sort checks over all rows look at the first 100 tickets only, since `pageSize` is capped at 100. Enough for the test DB today; walking every page would be needed if it grows past that.
 - **Subject and sender sorting follow the database collation:** the order of mixed-case or accented values depends on `helpdesk_test`'s collation, which may differ from production's. Not asserted.
