@@ -15,6 +15,7 @@ import {
   type TicketSortField,
 } from 'core/schemas/tickets'
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Link, useLocation } from 'react-router'
 import type { TicketFilterValues } from '@/components/TicketFilters.tsx'
 import { Button } from '@/components/ui/button.tsx'
 import { Skeleton } from '@/components/ui/skeleton.tsx'
@@ -26,6 +27,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table.tsx'
+import { errorMessage } from '@/lib/errorMessage.ts'
 import { categoryLabels } from '@/lib/ticketLabels.ts'
 
 export type Ticket = {
@@ -45,7 +47,7 @@ const columnHelper = createColumnHelper<typeof features, Ticket>()
 const columns = columnHelper.columns([
   columnHelper.accessor('subject', {
     header: 'Subject',
-    cell: ({ getValue }) => <div className="max-w-80 truncate font-medium">{getValue()}</div>,
+    cell: ({ row }) => <TicketSubjectLink ticket={row.original} />,
   }),
   columnHelper.accessor('senderName', {
     header: 'From',
@@ -77,6 +79,21 @@ const columns = columnHelper.columns([
     cell: ({ getValue }) => new Date(getValue()).toLocaleString(),
   }),
 ])
+
+// Passes the list's URL along, so the detail page's back link returns to the same filters,
+// sort and page.
+function TicketSubjectLink({ ticket }: { ticket: Ticket }) {
+  const location = useLocation()
+  return (
+    <Link
+      to={`/tickets/${ticket.id}`}
+      state={{ from: location.pathname + location.search }}
+      className="block max-w-80 truncate font-medium hover:underline"
+    >
+      {ticket.subject}
+    </Link>
+  )
+}
 
 const skeletonWidths = ['w-56', 'w-40', 'w-14', 'w-28', 'w-32']
 
@@ -237,11 +254,6 @@ function Pagination({ page, total, onPageChange }: PaginationProps) {
       </div>
     </nav>
   )
-}
-
-function errorMessage(error: Error) {
-  const status = axios.isAxiosError(error) ? error.response?.status : undefined
-  return status ? `Request failed (${status})` : 'Request failed'
 }
 
 export default TicketsTable

@@ -16,6 +16,11 @@ export function validateQuery<T>(schema: Schema<T>, req: Request, res: Response)
   return parseOr400(schema, req.query, res);
 }
 
+// Same as validate, for route params.
+export function validateParams<T>(schema: Schema<T>, req: Request, res: Response) {
+  return parseOr400(schema, req.params, res);
+}
+
 function parseOr400<T>(schema: Schema<T>, data: unknown, res: Response) {
   const parsed = schema.safeParse(data);
   if (!parsed.success) {

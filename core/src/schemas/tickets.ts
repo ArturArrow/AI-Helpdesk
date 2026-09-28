@@ -69,3 +69,13 @@ export const ticketListQuerySchema = z.object({
 export type TicketSortField = (typeof ticketSortFields)[number];
 export type TicketListQuery = z.infer<typeof ticketListQuerySchema>;
 export type TicketCategoryFilter = NonNullable<TicketListQuery["category"]>;
+
+// Params of GET /api/tickets/:id. The upper bound is Postgres int4's, so an oversized id is a
+// 400 rather than a database error.
+export const ticketIdParamsSchema = z.object({
+  id: z.coerce
+    .number({ error: "id must be a positive integer" })
+    .int("id must be a positive integer")
+    .min(1, "id must be a positive integer")
+    .max(2_147_483_647, "id must be a positive integer"),
+});

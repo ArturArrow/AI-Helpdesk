@@ -1,8 +1,8 @@
 import { Router } from "express";
-import { ticketListQuerySchema, UNCLASSIFIED } from "core/schemas/tickets";
+import { ticketIdParamsSchema, ticketListQuerySchema, UNCLASSIFIED } from "core/schemas/tickets";
 import type { Prisma } from "../../generated/prisma/client";
 import { prisma } from "../lib/db";
-import { validateQuery } from "../lib/validate";
+import { validateParams, validateQuery } from "../lib/validate";
 
 export const ticketsRouter = Router();
 
@@ -15,6 +15,14 @@ const ticketListSelect = {
   status: true,
   category: true,
   createdAt: true,
+} as const;
+
+// The detail adds the body. bodyHTML is left out: the sender's HTML isn't safe to render.
+const ticketDetailSelect = {
+  ...ticketListSelect,
+  body: true,
+  assignedToId: true,
+  updatedAt: true,
 } as const;
 
 const searchFields = ["subject", "senderName", "senderEmail", "body"] as const;
@@ -67,4 +75,22 @@ ticketsRouter.get("/", async (req, res) => {
     prisma.ticket.count({ where }),
   ]);
   res.json({ tickets, total });
+});
+
+ticketsRouter.get("/:id", async (req, res) => {
+  const params = validateParams(ticketIdParamsSchema, req, res);
+  if (!params) return;
+
+  const ticket = await prisma.ticket.findUnique({ where: { id: params.id }, select: ticketDetailSelect });
+  if (!ticket) {
+    res.status(404).json({ error: "Ticket not found" });
+    return;
+  }
+  // assignedToId has no relation, so look the agent up separately. Display only: a
+  // soft-deleted agent's name still shows on the tickets they had.
+  const { assignedToId, ...rest } = ticket;
+  const assignedTo = assignedToId
+    ? await prisma.user.findUnique({ where: { id: assignedToId }, select: { id: true, name: true } })
+    : null;
+  res.json({ ticket: { ...rest, assignedTo } });
 });
