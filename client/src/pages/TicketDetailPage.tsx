@@ -1,17 +1,26 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 import { ArrowLeft } from 'lucide-react'
 import { Link, useLocation, useParams } from 'react-router'
 import type { Ticket } from '@/components/TicketsTable.tsx'
 import { Card, CardContent } from '@/components/ui/card.tsx'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select.tsx'
 import { Skeleton } from '@/components/ui/skeleton.tsx'
 import { errorMessage } from '@/lib/errorMessage.ts'
 import { categoryLabels, statusLabels } from '@/lib/ticketLabels.ts'
 
+type Assignee = { id: string; name: string }
+
 type TicketDetail = Ticket & {
   body: string
   updatedAt: string
-  assignedTo: { id: string; name: string } | null
+  assignedTo: Assignee | null
 }
 
 function TicketDetailPage() {
@@ -67,7 +76,9 @@ function TicketDetailPage() {
             </div>
             <div>
               <dt className="text-muted-foreground">Assigned to</dt>
-              <dd>{ticket.assignedTo?.name ?? 'Unassigned'}</dd>
+              <dd>
+                <AssigneeSelect ticket={ticket} />
+              </dd>
             </div>
             <div>
               <dt className="text-muted-foreground">Created</dt>
@@ -88,6 +99,70 @@ function TicketDetailPage() {
           <Skeleton className="h-4 w-40" />
           <Skeleton className="h-32 w-full" />
         </div>
+      )}
+    </div>
+  )
+}
+
+// Picks the agent a ticket is assigned to; a null item unassigns it.
+function AssigneeSelect({ ticket }: { ticket: TicketDetail }) {
+  const queryClient = useQueryClient()
+
+  const { data: agents, error: agentsError } = useQuery({
+    queryKey: ['assignees'],
+    queryFn: async () => {
+      const res = await axios.get<{ agents: Assignee[] }>('/api/tickets/assignees')
+      return res.data.agents
+    },
+  })
+
+  const assign = useMutation({
+    mutationFn: async (assignedToId: string | null) => {
+      const res = await axios.patch<{ ticket: TicketDetail }>(`/api/tickets/${ticket.id}`, {
+        assignedToId,
+      })
+      return res.data.ticket
+    },
+    onSuccess: (updated) => queryClient.setQueryData(['ticket', String(ticket.id)], updated),
+  })
+
+  // A soft-deleted agent isn't in the list but can still hold the ticket, so keep them
+  // selectable as the current value rather than showing a bare id.
+  const current = ticket.assignedTo
+  const options =
+    current && !agents?.some((agent) => agent.id === current.id)
+      ? [current, ...(agents ?? [])]
+      : (agents ?? [])
+  const items: { value: string | null; label: string }[] = [
+    { value: null, label: 'Unassigned' },
+    ...options.map((agent) => ({ value: agent.id, label: agent.name })),
+  ]
+
+  return (
+    <div className="space-y-1">
+      <Select<string>
+        items={items}
+        value={current?.id ?? null}
+        onValueChange={(assignedToId) => assign.mutate(assignedToId)}
+        disabled={!agents || assign.isPending}
+      >
+        <SelectTrigger aria-label="Assigned to" className="w-56">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {items.map((item) => (
+            <SelectItem key={item.value ?? ''} value={item.value}>
+              {item.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {(agentsError || assign.error) && (
+        <p role="alert" className="text-sm text-destructive">
+          {agentsError
+            ? `Couldn't load agents: ${errorMessage(agentsError)}`
+            : `Couldn't assign the ticket: ${errorMessage(assign.error!)}`}
+        </p>
       )}
     </div>
   )

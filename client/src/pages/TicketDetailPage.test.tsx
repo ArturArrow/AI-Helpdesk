@@ -1,4 +1,4 @@
-import { getDefaultNormalizer, screen } from '@testing-library/react'
+import { getDefaultNormalizer, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import axios, { AxiosError } from 'axios'
 import { TicketCategory } from 'core/constants/ticketCategory'
@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { categoryLabels } from '@/lib/ticketLabels.ts'
 import { httpError } from '@/test/http.ts'
 import { renderWithRouter } from '@/test/render.tsx'
+import { choose } from '@/test/select.ts'
 import TicketDetailPage from './TicketDetailPage.tsx'
 
 const ticket = {
@@ -16,15 +17,27 @@ const ticket = {
   senderName: 'Rita Refund',
   senderEmail: 'rita@example.com',
   status: TicketStatus.open,
-  category: TicketCategory.refund_request,
+  category: TicketCategory.refund_request as TicketCategory | null,
   createdAt: '2026-04-04T09:30:00.000Z',
   updatedAt: '2026-04-05T14:15:00.000Z',
   body: 'Hello,\nplease refund my order.',
-  assignedTo: { id: 'user-2', name: 'Alan Agent' },
+  assignedTo: { id: 'user-2', name: 'Alan Agent' } as { id: string; name: string } | null,
 }
+
+const agents = [
+  { id: 'user-2', name: 'Alan Agent' },
+  { id: 'user-3', name: 'Bea Agent' },
+]
 
 function mockGet() {
   return vi.spyOn(axios, 'get')
+}
+
+// Answers both requests the page makes: the ticket, and the agents for the assignee select.
+function mockTicketAndAgents(t: typeof ticket) {
+  return mockGet().mockImplementation(async (url) =>
+    url === '/api/tickets/assignees' ? { data: { agents } } : { data: { ticket: t } },
+  )
 }
 
 // Stands in for the list page, showing where the back link led.
@@ -56,34 +69,36 @@ afterEach(() => {
 
 describe('TicketDetailPage', () => {
   it('requests the ticket for the id in the URL', async () => {
-    const get = mockGet().mockResolvedValue({ data: { ticket } })
+    const get = mockTicketAndAgents(ticket)
     renderAt('/tickets/42')
 
     await screen.findByRole('heading', { name: ticket.subject, level: 1 })
-    expect(get).toHaveBeenCalledTimes(1)
-    expect(get).toHaveBeenCalledWith('/api/tickets/42')
+    // The other request is the assignee select's agent list.
+    expect(get.mock.calls.map(([url]) => url).filter((url) => url !== '/api/tickets/assignees')).toEqual([
+      '/api/tickets/42',
+    ])
   })
 
   it('renders the subject, status, category, sender, assignee, dates and body', async () => {
-    mockGet().mockResolvedValue({ data: { ticket } })
+    mockTicketAndAgents(ticket)
     renderAt('/tickets/42')
 
     expect(await screen.findByRole('heading', { name: 'Refund for order 1234', level: 1 })).toBeInTheDocument()
     expect(screen.getByText('Open · Refund request')).toBeInTheDocument()
     expect(fields()).toEqual([
       ['From', 'Rita Refund <rita@example.com>'],
-      ['Assigned to', 'Alan Agent'],
+      // The value is now a select; its trigger also holds an aria-hidden chevron.
+      ['Assigned to', expect.stringContaining('Alan Agent')],
       ['Created', new Date(ticket.createdAt).toLocaleString()],
       ['Updated', new Date(ticket.updatedAt).toLocaleString()],
     ])
+    expect(screen.getByRole('combobox', { name: 'Assigned to' })).toHaveTextContent('Alan Agent')
     expect(screen.getByText(/please refund my order/)).toBeInTheDocument()
     expect(document.querySelector('[aria-busy="true"]')).not.toBeInTheDocument()
   })
 
   it('shows Unclassified for a ticket without a category', async () => {
-    mockGet().mockResolvedValue({
-      data: { ticket: { ...ticket, status: TicketStatus.resolved, category: null } },
-    })
+    mockTicketAndAgents({ ...ticket, status: TicketStatus.resolved, category: null })
     renderAt('/tickets/42')
 
     await screen.findByRole('heading', { name: ticket.subject, level: 1 })
@@ -95,16 +110,19 @@ describe('TicketDetailPage', () => {
   })
 
   it('shows Unassigned for a ticket without an assignee', async () => {
-    mockGet().mockResolvedValue({ data: { ticket: { ...ticket, assignedTo: null } } })
+    mockTicketAndAgents({ ...ticket, assignedTo: null })
     renderAt('/tickets/42')
 
     await screen.findByRole('heading', { name: ticket.subject, level: 1 })
-    expect(fields()).toContainEqual(['Assigned to', 'Unassigned'])
+    expect(fields()).toContainEqual(['Assigned to', expect.stringContaining('Unassigned')])
+    const trigger = screen.getByRole('combobox', { name: 'Assigned to' })
+    expect(trigger).toHaveTextContent('Unassigned')
+    expect(trigger).not.toHaveTextContent('Alan Agent')
   })
 
   it('keeps the body as plain text with its line breaks and spacing', async () => {
     const body = 'Line one\n\n  indented <b>x</b>\nlast line  '
-    mockGet().mockResolvedValue({ data: { ticket: { ...ticket, body } } })
+    mockTicketAndAgents({ ...ticket, body })
     renderAt('/tickets/42')
     await screen.findByRole('heading', { name: ticket.subject, level: 1 })
 
@@ -159,7 +177,7 @@ describe('TicketDetailPage', () => {
   describe('back link', () => {
     it('returns to the list URL passed in state.from, keeping its filters, sort and page', async () => {
       const user = userEvent.setup()
-      mockGet().mockResolvedValue({ data: { ticket } })
+      mockTicketAndAgents(ticket)
       const from = '/tickets?status=open&sortBy=subject&sortOrder=asc&page=2'
       renderAt({ pathname: '/tickets/42', state: { from } })
       await screen.findByRole('heading', { name: ticket.subject, level: 1 })
@@ -173,7 +191,7 @@ describe('TicketDetailPage', () => {
 
     it('goes to /tickets when opened without state (e.g. a direct link)', async () => {
       const user = userEvent.setup()
-      mockGet().mockResolvedValue({ data: { ticket } })
+      mockTicketAndAgents(ticket)
       renderAt('/tickets/42')
       await screen.findByRole('heading', { name: ticket.subject, level: 1 })
 
@@ -182,6 +200,131 @@ describe('TicketDetailPage', () => {
       await user.click(back)
 
       expect((await screen.findByRole('status', { name: 'List URL' })).textContent).toBe('/tickets')
+    })
+  })
+  describe('assignee select', () => {
+    const bea = { id: 'user-3', name: 'Bea Agent' }
+
+    function assigneeSelect() {
+      return screen.getByRole('combobox', { name: 'Assigned to' })
+    }
+
+    // Renders the ticket and waits until the agents have loaded and the select is usable.
+    async function renderLoaded() {
+      renderAt('/tickets/42')
+      await waitFor(() => expect(assigneeSelect()).toBeEnabled())
+    }
+
+    it('lists Unassigned and then the agents when opened', async () => {
+      const user = userEvent.setup()
+      const get = mockTicketAndAgents(ticket)
+      await renderLoaded()
+
+      await user.click(assigneeSelect())
+
+      const listbox = await screen.findByRole('listbox')
+      expect(within(listbox).getAllByRole('option').map((o) => o.textContent)).toEqual([
+        'Unassigned',
+        'Alan Agent',
+        'Bea Agent',
+      ])
+      expect(get).toHaveBeenCalledWith('/api/tickets/assignees')
+    })
+
+    it('assigns the chosen agent and shows them in the trigger', async () => {
+      const user = userEvent.setup()
+      mockTicketAndAgents(ticket)
+      const patch = vi.spyOn(axios, 'patch').mockResolvedValue({ data: { ticket: { ...ticket, assignedTo: bea } } })
+      await renderLoaded()
+
+      await choose(user, assigneeSelect(), 'Bea Agent')
+
+      expect(patch).toHaveBeenCalledExactlyOnceWith('/api/tickets/42', { assignedToId: 'user-3' })
+      await waitFor(() => expect(assigneeSelect()).toHaveTextContent('Bea Agent'))
+      expect(assigneeSelect()).not.toHaveTextContent('Alan Agent')
+      expect(assigneeSelect()).toBeEnabled()
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('sends assignedToId: null for Unassigned', async () => {
+      const user = userEvent.setup()
+      mockTicketAndAgents(ticket)
+      const patch = vi.spyOn(axios, 'patch').mockResolvedValue({ data: { ticket: { ...ticket, assignedTo: null } } })
+      await renderLoaded()
+
+      await choose(user, assigneeSelect(), 'Unassigned')
+
+      expect(patch).toHaveBeenCalledExactlyOnceWith('/api/tickets/42', { assignedToId: null })
+      await waitFor(() => expect(assigneeSelect()).toHaveTextContent('Unassigned'))
+    })
+
+    it('is disabled while the agents are loading', async () => {
+      mockGet().mockImplementation((url) =>
+        url === '/api/tickets/assignees' ? new Promise(() => {}) : Promise.resolve({ data: { ticket } }),
+      )
+      renderAt('/tickets/42')
+
+      await screen.findByRole('heading', { name: ticket.subject, level: 1 })
+      expect(assigneeSelect()).toBeDisabled()
+      // The current assignee still shows while the list loads.
+      expect(assigneeSelect()).toHaveTextContent('Alan Agent')
+    })
+
+    it('is disabled while the assignment is being saved', async () => {
+      const user = userEvent.setup()
+      mockTicketAndAgents(ticket)
+      vi.spyOn(axios, 'patch').mockReturnValue(new Promise(() => {}))
+      await renderLoaded()
+
+      await choose(user, assigneeSelect(), 'Bea Agent')
+
+      await waitFor(() => expect(assigneeSelect()).toBeDisabled())
+    })
+
+    it('shows an alert and keeps the previous assignee when the assignment fails', async () => {
+      const user = userEvent.setup()
+      mockTicketAndAgents(ticket)
+      vi.spyOn(axios, 'patch').mockRejectedValue(httpError(400, { error: 'assignedToId must be an active agent' }))
+      await renderLoaded()
+
+      await choose(user, assigneeSelect(), 'Bea Agent')
+
+      const alert = await screen.findByRole('alert')
+      expect(alert.textContent).toBe("Couldn't assign the ticket: Request failed (400)")
+      expect(assigneeSelect()).toHaveTextContent('Alan Agent')
+      expect(assigneeSelect()).not.toHaveTextContent('Bea Agent')
+      expect(assigneeSelect()).toBeEnabled()
+    })
+
+    it('shows an alert when the agents fail to load', async () => {
+      mockGet().mockImplementation(async (url) => {
+        if (url === '/api/tickets/assignees') throw httpError(500)
+        return { data: { ticket } }
+      })
+      renderAt('/tickets/42')
+
+      const alert = await screen.findByRole('alert')
+      expect(alert.textContent).toBe("Couldn't load agents: Request failed (500)")
+      // The ticket itself still renders.
+      expect(screen.getByRole('heading', { name: ticket.subject, level: 1 })).toBeInTheDocument()
+      expect(assigneeSelect()).toBeDisabled()
+    })
+
+    it('still shows a current assignee who is missing from the agents list by name', async () => {
+      const user = userEvent.setup()
+      // A soft-deleted agent: still on the ticket, no longer returned as an assignee.
+      mockTicketAndAgents({ ...ticket, assignedTo: { id: 'user-9', name: 'Del Departed' } })
+      await renderLoaded()
+
+      expect(assigneeSelect()).toHaveTextContent('Del Departed')
+      await user.click(assigneeSelect())
+      const listbox = await screen.findByRole('listbox')
+      expect(within(listbox).getAllByRole('option').map((o) => o.textContent)).toEqual([
+        'Unassigned',
+        'Del Departed',
+        'Alan Agent',
+        'Bea Agent',
+      ])
     })
   })
 })

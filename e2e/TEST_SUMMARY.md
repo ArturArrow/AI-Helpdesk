@@ -3,8 +3,8 @@
 ## Last run
 
 - **Date:** 2026-10-02
-- **Discovered (`--list`):** 155 tests in 7 files (api-auth 16, login 6, routing 5, session 7, tickets 82, users 22, webhook 17)
-- **Result:** 155 passed, 0 failed, 40.3s (chromium).
+- **Discovered (`--list`):** 176 tests in 7 files (api-auth 16, login 6, routing 5, session 7, tickets 103, users 22, webhook 17)
+- **Result:** not run since adding the GET `/api/tickets/assignees` and PATCH `/api/tickets/:id` tests. Before that change: 155 passed, 0 failed, 40.3s (chromium).
 
 ## tests/login.spec.ts
 
@@ -92,7 +92,7 @@ POST `/api/webhooks/inbound-email`. The route returns only `{"ticket":{"id":<num
 
 ## tests/tickets.spec.ts
 
-GET `/api/tickets` and GET `/api/tickets/:id`, at the API only (the page UI is in Vitest). Other specs create tickets too and the list is paginated (10 by default, `DEFAULT_TICKET_PAGE_SIZE`), so each test narrows the list to its own tickets with `q=<unique token>`, or uses `pageSize=100` when a check covers every row. They compare relative order, never positions or counts, except where `q` makes the matching set exactly the test's tickets.
+GET `/api/tickets`, GET `/api/tickets/:id`, GET `/api/tickets/assignees` and PATCH `/api/tickets/:id`, at the API only (the page UI is in Vitest). Other specs create tickets too and the list is paginated (10 by default, `DEFAULT_TICKET_PAGE_SIZE`), so each test narrows the list to its own tickets with `q=<unique token>`, or uses `pageSize=100` when a check covers every row. They compare relative order, never positions or counts, except where `q` makes the matching set exactly the test's tickets.
 
 - GET `/api/tickets` without a session gets 401 `{"error":"Unauthorized"}`.
 - The agent gets 200 and the list holds a ticket just created through the webhook.
@@ -159,8 +159,27 @@ Detail (GET `/api/tickets/:id`):
 - `abc`, `0`, `-1`, `1.5` and `2147483648` (above int4) get 400 `{"error":"id must be a positive integer"}` (one test each).
 - `2147483647` (the int4 maximum, valid but nonexistent) gets 404 `{"error":"Ticket not found"}`.
 - A webhook ticket sent with `bodyHTML` and a `messageId` comes back as exactly `{ ticket }` with `id`, `subject`, `senderName`, `senderEmail`, `status` `open`, `category` null, parseable `createdAt` and `updatedAt`, `body` and `assignedTo` null; no `bodyHTML`, `messageId` or `assignedToId`.
-- A ticket assigned (in the DB) to an admin-created agent returns `assignedTo: { id, name }` of that agent, read by the seeded agent, with no `assignedToId`.
+- A ticket assigned (through PATCH) to an admin-created agent returns `assignedTo: { id, name }` of that agent, read by the seeded agent, with no `assignedToId`.
 - After that assignee is soft-deleted, `assignedTo` still shows their `{ id, name }`.
+
+Assignees (GET `/api/tickets/assignees`). Other specs create and delete agents, so these check membership and relative order, never the full list.
+
+- Without a session gets 401 `{"error":"Unauthorized"}`.
+- The agent and the admin (one test each) get 200 with exactly `{ agents }`; the seeded agent is listed as `{ id, name: "Agent" }`, and every entry has exactly `id` and `name`.
+- The admin's id (from `/api/me`) is not listed.
+- A soft-deleted agent is not listed; an active one created alongside it is.
+- Three agents created B, C, A are listed A, B, C (name ascending).
+
+Assignment (PATCH `/api/tickets/:id` with `{ assignedToId }`):
+
+- Without a session, both an existing id and `abc` get 401 `{"error":"Unauthorized"}`, and the ticket stays unassigned.
+- The agent and the admin (one test each) assign a ticket to an active agent: 200 with exactly `{ ticket }` in the detail shape (the GET's ticket with `assignedTo: { id, name }` of the agent, no `bodyHTML` or `assignedToId`), `updatedAt` later than before, and a following GET returns the same ticket.
+- The agent and the admin (one test each) unassign with `null`: 200 with the detail keys and `assignedTo: null`, also on a following GET.
+- Reassigning to a second agent replaces the first in `assignedTo`.
+- `2147483647` (valid but nonexistent) gets 404 `{"error":"Ticket not found"}`.
+- `abc` gets 400 `{"error":"id must be a positive integer"}`.
+- An unknown user id, the admin's id and a soft-deleted agent's id (one test each) get 400 `{"error":"assignedToId must be an active agent"}`, and the ticket stays unassigned.
+- A missing, empty (`""`), blank (`"   "`) and numeric (`123`) `assignedToId` (one test each) get 400 `{"error":"assignedToId must be a user id or null"}`.
 
 ## Harness helpers
 
@@ -179,10 +198,9 @@ Detail (GET `/api/tickets/:id`):
   - `deleteUserViaApi(request, id)` soft-deletes a user through DELETE `/api/users/:id` (signed in as the admin) and asserts 204.
   - `users.spec.ts` keeps its own `userRow`, `openNewUserDialog`, `submitNewUser`, `openEditDialog`, `openDeleteDialog` and `postSignIn`, which only it uses.
 - **`fixtures/webhook.ts`:** `inboundSecret()` reads `INBOUND_EMAIL_SECRET` from `server/.env.test` (the file `start:test` loads) with `node:util`'s `parseEnv`, so the tests and the server share one value. It reads lazily and throws a clear error if the value is missing, so other specs still load. `webhook.spec.ts` keeps its own `validEmail` (unique sender per call), `uniqueMessageId`, `postInbound`, `expectUnauthorized` and `expectCreated`.
-- **`fixtures/tickets.ts`:** `createTicketViaWebhook(request, label, overrides?)` posts a unique email (subject `E2E <label> <suffix>`, unique sender, body `Please help.`) to the inbound webhook with the secret, asserts 201 and returns the ticket's `id`, `subject`, `senderName` and `senderEmail`. `overrides` sets `subject`, `senderName`, `senderEmail` or `body` exactly, for the sorting and search tests. The defaults contain no `%`, `_` or `\`. It needs no session. `assignTicketInDb(ticketId, assigneeId)` sets a ticket's `assignedToId` by running `e2e/assign-ticket.ts` from `server/` with only `.env.test` loaded (the same way global setup runs its steps), since no endpoint assigns tickets yet. `tickets.spec.ts` keeps its own `getTicketPage(request, params)` (GET with sort, filter, search and paging params, asserts 200, returns `{ tickets, total }`), `listTickets(request, params)` (the same, returning only `tickets`), `expectInOrder(tickets, ids)` (the ids are listed in that relative order), `searchOverride(field, token)` (puts a token into one field) `expectAllContain(tickets, text)` (every row holds the text in subject, sender name or email), `expectRowsMatch(tickets, filters)` and `expectFilter(request, filters, id, subject, listed)` (the filter keeps or drops the ticket, and every row of a page of 100 matches), and `createTicketsWithToken(request, token, labels)` (one ticket per label, subject `<token> <label>`).
+- **`fixtures/tickets.ts`:** `createTicketViaWebhook(request, label, overrides?)` posts a unique email (subject `E2E <label> <suffix>`, unique sender, body `Please help.`) to the inbound webhook with the secret, asserts 201 and returns the ticket's `id`, `subject`, `senderName` and `senderEmail`. `overrides` sets `subject`, `senderName`, `senderEmail` or `body` exactly, for the sorting and search tests. The defaults contain no `%`, `_` or `\`. It needs no session. `assignTicketViaApi(request, ticketId, assignedToId)` assigns (or, with `null`, unassigns) through PATCH `/api/tickets/:id`, asserts 200 and returns the ticket; the request must be signed in. `tickets.spec.ts` keeps its own `currentUserId(request)` (the signed-in user's id from `/api/me`), `listAssignees(request)` (GET `/api/tickets/assignees`, asserts 200 and exactly `{ agents }`), `getTicketPage(request, params)` (GET with sort, filter, search and paging params, asserts 200, returns `{ tickets, total }`), `listTickets(request, params)` (the same, returning only `tickets`), `expectInOrder(tickets, ids)` (the ids are listed in that relative order), `searchOverride(field, token)` (puts a token into one field) `expectAllContain(tickets, text)` (every row holds the text in subject, sender name or email), `expectRowsMatch(tickets, filters)` and `expectFilter(request, filters, id, subject, listed)` (the filter keeps or drops the ticket, and every row of a page of 100 matches), and `createTicketsWithToken(request, token, labels)` (one ticket per label, subject `<token> <label>`).
 - Helpers are plain exported functions: no page objects and no `test.extend` fixtures.
 - **`global-setup.ts`:** runs the test-DB guard, `prisma migrate reset --force`, the admin seed, then `seed-agent.ts`. Each run starts with two users: the admin and the agent.
-- **`assign-ticket.ts`:** sets `assignedToId` on one ticket through the server's Prisma client (`E2E_TICKET_ID`, `E2E_ASSIGNEE_ID`). It refuses any `DATABASE_URL` not ending in `_test`, like `scripts/assert-test-db.ts`. It imports `db.ts` by a variable path, like `seed-agent.ts`.
 - **`seed-agent.ts`:** creates the agent through Better Auth's `internalAdapter`, like `prisma/seed.ts` creates the admin. It reads the credentials from `E2E_AGENT_*` environment variables and skips if the agent already exists.
 - **`global-teardown.ts`:** only logs. It leaves `helpdesk_test` intact for debugging.
 - Specs import helpers as `../fixtures/auth.js` (`global-setup.ts` as `./fixtures/auth.js`), because the root tsconfig rejects `.ts` import extensions (TS5097).
@@ -209,14 +227,17 @@ Detail (GET `/api/tickets/:id`):
 - **Pagination UI and the count/page consistency under concurrent writes:** the table's paging controls are covered by Vitest, not E2E. That `total` and the page come from one `$transaction` can't be observed from a serial test.
 - **Search ranking, multi-word and accent handling:** `q` is one case-insensitive substring over four fields; tokens aren't split, results aren't ranked, and accent-insensitive matching isn't tested (Postgres `ILIKE` doesn't fold accents).
 - **Search on `body` rows:** the list doesn't return `body`, so the body-search test can only check which ids come back, not the matched text.
-- **Not built yet:** restoring a deleted user, ticket CRUD beyond webhook creation, the list and the detail (create, update, assignment through the API), AI features, email, and the dashboard.
+- **The assignment UI on the detail page:** covered by component tests, not E2E.
+- **Concurrent assignment:** two PATCHes racing on one ticket (last write wins) can't be observed from a serial test.
+- **Not built yet:** restoring a deleted user, ticket creation through the API and updates other than assignment (status, category, content), AI features, email, and the dashboard.
 
 ## Open questions
 
 - **No return-to after login:** a user bounced from a deep link (e.g. `/users`) lands on `/` after signing in, not on the page they asked for. `routing.spec.ts` records this behaviour. If a return-to redirect is added, that test needs updating.
 - **A deleted user's email stays reserved:** POST and PATCH still see soft-deleted users, so the email can't be reused (409), and nothing in the UI shows why. `users.spec.ts` records this.
 - **Webhook storage is only partly observable:** GET `/api/tickets/:id` exposes `body` but deliberately not `bodyHTML` (unsafe to render) or `messageId`, so those stay unchecked as stored.
-- **Assignment is written straight to the DB:** no endpoint assigns tickets, so `assignTicketInDb` sets `assignedToId` through Prisma in `helpdesk_test`. Once an assignment endpoint exists, the two `assignedTo` tests should use it instead.
+- **Resolved: assignment goes through the API.** The DB-writing `e2e/assign-ticket.ts` and `assignTicketInDb` were removed; the `assignedTo` detail tests now assign with PATCH `/api/tickets/:id`.
+- **A soft-deleted agent's tickets keep them as assignee:** deleting a user doesn't unassign their tickets, and PATCH only refuses new assignments to them. Not tested beyond the detail still showing them.
 - **A soft-deleted assignee still shows on the ticket:** GET `/api/tickets/:id` doesn't filter `deletedAt` for `assignedTo` (by design, per the route comment). `tickets.spec.ts` records this.
 - **An `assignedToId` pointing at no user returns `assignedTo: null`:** the column has no foreign key, so a dangling id is indistinguishable from unassigned. Not tested.
 - **Resolved: the ticket list is paginated** (`page`, `pageSize`, `{ tickets, total }`), and `tickets.spec.ts` now narrows each list with `q` or `pageSize=100`.

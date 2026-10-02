@@ -1,5 +1,3 @@
-import { execSync } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
 import { expect, type APIRequestContext } from '@playwright/test'
 import { uniqueSuffix } from './users.js'
 import { inboundSecret } from './webhook.js'
@@ -36,12 +34,10 @@ export async function createTicketViaWebhook(
   return { id: ticket.id, subject: data.subject, senderName: data.senderName, senderEmail: data.senderEmail }
 }
 
-// Sets a ticket's assignedToId in helpdesk_test through e2e/assign-ticket.ts, since no endpoint
-// assigns tickets yet. Runs like global-setup's steps: from server/, with only .env.test loaded.
-export function assignTicketInDb(ticketId: number, assigneeId: string) {
-  execSync('bun --env-file=.env.test run ../e2e/assign-ticket.ts', {
-    cwd: fileURLToPath(new URL('../../server', import.meta.url)),
-    stdio: 'inherit',
-    env: { ...process.env, E2E_TICKET_ID: String(ticketId), E2E_ASSIGNEE_ID: assigneeId },
-  })
+// Assigns a ticket through PATCH /api/tickets/:id (null unassigns), asserts 200 and returns the
+// ticket. `request` must be signed in (as anyone).
+export async function assignTicketViaApi(request: APIRequestContext, ticketId: number, assignedToId: string | null) {
+  const res = await request.patch(`/api/tickets/${ticketId}`, { data: { assignedToId } })
+  expect(res.status(), `assign ticket ${ticketId} to ${assignedToId}`).toBe(200)
+  return (await res.json()).ticket
 }

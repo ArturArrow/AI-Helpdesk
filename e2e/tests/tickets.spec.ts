@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 import { ADMIN, AGENT, signInViaApi } from '../fixtures/auth.js'
-import { assignTicketInDb, createTicketViaWebhook } from '../fixtures/tickets.js'
+import { assignTicketViaApi, createTicketViaWebhook } from '../fixtures/tickets.js'
 import { createUserViaApi, deleteUserViaApi, uniqueSuffix } from '../fixtures/users.js'
 import { inboundSecret } from '../fixtures/webhook.js'
 
@@ -750,7 +750,7 @@ test.describe('GET /api/tickets/:id', () => {
     await signInViaApi(request, ADMIN)
     const agent = await createUserViaApi(request, 'assignee')
     const ticket = await createTicketViaWebhook(request, 'detail-assigned')
-    assignTicketInDb(ticket.id, agent.id)
+    await assignTicketViaApi(request, ticket.id, agent.id)
 
     await signInViaApi(request, AGENT)
     const res = await request.get(`/api/tickets/${ticket.id}`)
@@ -764,11 +764,220 @@ test.describe('GET /api/tickets/:id', () => {
     await signInViaApi(request, ADMIN)
     const agent = await createUserViaApi(request, 'deleted-assignee')
     const ticket = await createTicketViaWebhook(request, 'detail-deleted-assignee')
-    assignTicketInDb(ticket.id, agent.id)
+    await assignTicketViaApi(request, ticket.id, agent.id)
     await deleteUserViaApi(request, agent.id)
 
     const res = await request.get(`/api/tickets/${ticket.id}`)
     expect(res.status()).toBe(200)
     expect((await res.json()).ticket.assignedTo).toEqual({ id: agent.id, name: agent.name })
   })
+})
+
+// The signed-in user's id, from /api/me.
+async function currentUserId(request: APIRequestContext): Promise<string> {
+  const res = await request.get('/api/me')
+  expect(res.status()).toBe(200)
+  return (await res.json()).user.id
+}
+
+type Assignee = { id: string; name: string }
+
+async function listAssignees(request: APIRequestContext): Promise<Assignee[]> {
+  const res = await request.get('/api/tickets/assignees')
+  expect(res.status()).toBe(200)
+  const body = await res.json()
+  expect(Object.keys(body)).toEqual(['agents'])
+  return body.agents
+}
+
+test.describe('GET /api/tickets/assignees', () => {
+  test('401 without a session', async ({ request }) => {
+    const res = await request.get('/api/tickets/assignees')
+    expect(res.status()).toBe(401)
+    expect(await res.json()).toEqual({ error: 'Unauthorized' })
+  })
+
+  for (const user of [AGENT, ADMIN]) {
+    test(`200 for the ${user.name.toLowerCase()}, listing the seeded agent with exactly id and name`, async ({ request }) => {
+      await signInViaApi(request, AGENT)
+      const agentId = await currentUserId(request)
+      await signInViaApi(request, user)
+
+      const agents = await listAssignees(request)
+      expect(agents).toContainEqual({ id: agentId, name: AGENT.name })
+      for (const agent of agents) {
+        expect(Object.keys(agent).sort()).toEqual(['id', 'name'])
+      }
+    })
+  }
+
+  test('the admin is not listed', async ({ request }) => {
+    await signInViaApi(request, ADMIN)
+    const adminId = await currentUserId(request)
+
+    const agents = await listAssignees(request)
+    expect(agents.map((a) => a.id)).not.toContain(adminId)
+  })
+
+  test('a soft-deleted agent is not listed, an active one is', async ({ request }) => {
+    await signInViaApi(request, ADMIN)
+    const kept = await createUserViaApi(request, 'assignee-kept')
+    const deleted = await createUserViaApi(request, 'assignee-deleted')
+    await deleteUserViaApi(request, deleted.id)
+
+    const ids = (await listAssignees(request)).map((a) => a.id)
+    expect(ids).toContain(kept.id)
+    expect(ids).not.toContain(deleted.id)
+  })
+
+  test('agents are ordered by name ascending', async ({ request }) => {
+    // createUserViaApi names users `E2E <label> <suffix>`, so these sort by the label's last
+    // lower-case letter under any collation. Created out of order, so createdAt order would fail.
+    await signInViaApi(request, ADMIN)
+    const b = await createUserViaApi(request, 'assignee-order-b')
+    const c = await createUserViaApi(request, 'assignee-order-c')
+    const a = await createUserViaApi(request, 'assignee-order-a')
+    const ids = [a.id, b.id, c.id]
+
+    await signInViaApi(request, AGENT)
+    const listed = (await listAssignees(request)).map((agent) => agent.id).filter((id) => ids.includes(id))
+    expect(listed).toEqual(ids)
+  })
+})
+
+const ASSIGNEE_ERROR = 'assignedToId must be an active agent'
+const ASSIGNED_TO_ID_ERROR = 'assignedToId must be a user id or null'
+
+test.describe('PATCH /api/tickets/:id', () => {
+  test('401 without a session, for an existing and an invalid id; the ticket stays unassigned', async ({ request }) => {
+    const ticket = await createTicketViaWebhook(request, 'patch-401')
+
+    // Auth runs before validation and the assignee lookup, so any id answers 401.
+    for (const id of [String(ticket.id), 'abc']) {
+      const res = await request.patch(`/api/tickets/${id}`, { data: { assignedToId: 'any-user-id' } })
+      expect(res.status(), `id ${id}`).toBe(401)
+      expect(await res.json()).toEqual({ error: 'Unauthorized' })
+    }
+
+    await signInViaApi(request, AGENT)
+    const res = await request.get(`/api/tickets/${ticket.id}`)
+    expect((await res.json()).ticket.assignedTo).toBeNull()
+  })
+
+  for (const user of [AGENT, ADMIN]) {
+    test(`the ${user.name.toLowerCase()} assigns a ticket to an active agent: 200 with the detail shape, persisted, updatedAt advances`, async ({ request }) => {
+      await signInViaApi(request, ADMIN)
+      const agent = await createUserViaApi(request, 'patch-assignee')
+      const ticket = await createTicketViaWebhook(request, 'patch-assign')
+      await signInViaApi(request, user)
+      const before = (await (await request.get(`/api/tickets/${ticket.id}`)).json()).ticket
+
+      const res = await request.patch(`/api/tickets/${ticket.id}`, { data: { assignedToId: agent.id } })
+      expect(res.status()).toBe(200)
+      const body = await res.json()
+      expect(Object.keys(body)).toEqual(['ticket'])
+      expect(Object.keys(body.ticket).sort()).toEqual(DETAIL_KEYS)
+      expect(body.ticket).toEqual({
+        ...before,
+        assignedTo: { id: agent.id, name: agent.name },
+        updatedAt: expect.any(String),
+      })
+      expect(body.ticket).not.toHaveProperty('bodyHTML')
+      expect(body.ticket).not.toHaveProperty('assignedToId')
+      expect(Date.parse(body.ticket.updatedAt)).toBeGreaterThan(Date.parse(before.updatedAt))
+
+      const after = await request.get(`/api/tickets/${ticket.id}`)
+      expect(after.status()).toBe(200)
+      expect((await after.json()).ticket).toEqual(body.ticket)
+    })
+
+    test(`the ${user.name.toLowerCase()} unassigns a ticket with null`, async ({ request }) => {
+      await signInViaApi(request, ADMIN)
+      const agent = await createUserViaApi(request, 'patch-unassignee')
+      const ticket = await createTicketViaWebhook(request, 'patch-unassign')
+      await assignTicketViaApi(request, ticket.id, agent.id)
+      await signInViaApi(request, user)
+
+      const res = await request.patch(`/api/tickets/${ticket.id}`, { data: { assignedToId: null } })
+      expect(res.status()).toBe(200)
+      const body = await res.json()
+      expect(Object.keys(body.ticket).sort()).toEqual(DETAIL_KEYS)
+      expect(body.ticket).toMatchObject({ id: ticket.id, assignedTo: null })
+
+      const after = await request.get(`/api/tickets/${ticket.id}`)
+      expect((await after.json()).ticket.assignedTo).toBeNull()
+    })
+  }
+
+  test('reassigning replaces the previous assignee', async ({ request }) => {
+    await signInViaApi(request, ADMIN)
+    const first = await createUserViaApi(request, 'patch-first')
+    const second = await createUserViaApi(request, 'patch-second')
+    const ticket = await createTicketViaWebhook(request, 'patch-reassign')
+    await assignTicketViaApi(request, ticket.id, first.id)
+
+    const reassigned = await assignTicketViaApi(request, ticket.id, second.id)
+    expect(reassigned.assignedTo).toEqual({ id: second.id, name: second.name })
+  })
+
+  test('a valid but nonexistent id (2147483647) gets 404', async ({ request }) => {
+    await signInViaApi(request, AGENT)
+    const agentId = await currentUserId(request)
+    const res = await request.patch('/api/tickets/2147483647', { data: { assignedToId: agentId } })
+    expect(res.status()).toBe(404)
+    expect(await res.json()).toEqual({ error: 'Ticket not found' })
+  })
+
+  test(`id abc gets 400 ${JSON.stringify(TICKET_ID_ERROR)}`, async ({ request }) => {
+    await signInViaApi(request, AGENT)
+    const agentId = await currentUserId(request)
+    const res = await request.patch('/api/tickets/abc', { data: { assignedToId: agentId } })
+    expect(res.status()).toBe(400)
+    expect(await res.json()).toEqual({ error: TICKET_ID_ERROR })
+  })
+
+  const notAssignable: [string, (request: APIRequestContext) => Promise<string>][] = [
+    ['an unknown user id', async () => `no-such-user-${uniqueSuffix()}`],
+    ['the admin\'s id', async (request) => {
+      await signInViaApi(request, ADMIN)
+      return currentUserId(request)
+    }],
+    ['a soft-deleted agent\'s id', async (request) => {
+      await signInViaApi(request, ADMIN)
+      const agent = await createUserViaApi(request, 'patch-deleted')
+      await deleteUserViaApi(request, agent.id)
+      return agent.id
+    }],
+  ]
+  for (const [label, makeId] of notAssignable) {
+    test(`${label} gets 400 ${JSON.stringify(ASSIGNEE_ERROR)} and the ticket is unchanged`, async ({ request }) => {
+      const ticket = await createTicketViaWebhook(request, 'patch-not-assignable')
+      const assignedToId = await makeId(request)
+      await signInViaApi(request, AGENT)
+
+      const res = await request.patch(`/api/tickets/${ticket.id}`, { data: { assignedToId } })
+      expect(res.status()).toBe(400)
+      expect(await res.json()).toEqual({ error: ASSIGNEE_ERROR })
+
+      const after = await request.get(`/api/tickets/${ticket.id}`)
+      expect((await after.json()).ticket.assignedTo).toBeNull()
+    })
+  }
+
+  const invalidBodies: [string, object][] = [
+    ['a missing assignedToId', {}],
+    ['an empty assignedToId', { assignedToId: '' }],
+    ['a blank assignedToId', { assignedToId: '   ' }],
+    ['a numeric assignedToId', { assignedToId: 123 }],
+  ]
+  for (const [label, data] of invalidBodies) {
+    test(`${label} gets 400 ${JSON.stringify(ASSIGNED_TO_ID_ERROR)}`, async ({ request }) => {
+      const ticket = await createTicketViaWebhook(request, 'patch-invalid-body')
+      await signInViaApi(request, AGENT)
+
+      const res = await request.patch(`/api/tickets/${ticket.id}`, { data })
+      expect(res.status()).toBe(400)
+      expect(await res.json()).toEqual({ error: ASSIGNED_TO_ID_ERROR })
+    })
+  }
 })

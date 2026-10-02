@@ -1,5 +1,5 @@
 import { act, screen, waitFor, within } from '@testing-library/react'
-import userEvent, { type UserEvent } from '@testing-library/user-event'
+import userEvent from '@testing-library/user-event'
 import axios, { AxiosError, type AxiosRequestConfig } from 'axios'
 import { TicketCategory } from 'core/constants/ticketCategory'
 import { TicketStatus } from 'core/constants/ticketStatus'
@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Ticket } from '@/components/TicketsTable.tsx'
 import { httpError } from '@/test/http.ts'
 import { renderWithRouter } from '@/test/render.tsx'
+import { choose } from '@/test/select.ts'
 import TicketsPage from './TicketsPage.tsx'
 
 // Newest first, as the server returns them.
@@ -98,11 +99,6 @@ function statusSelect() {
 
 function categorySelect() {
   return screen.getByRole('combobox', { name: 'Filter by category' })
-}
-
-async function choose(user: UserEvent, select: HTMLElement, option: string) {
-  await user.click(select)
-  await user.click(await screen.findByRole('option', { name: option }))
 }
 
 afterEach(() => {

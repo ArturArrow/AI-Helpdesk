@@ -33,9 +33,9 @@
 - [ ] Implement create ticket API endpoint
 - [x] Implement list tickets API endpoint (with filtering by status and category, sorting) — `GET /api/tickets?status=&category=&sortBy=&sortOrder=`
 - [x] Implement get ticket API endpoint — `GET /api/tickets/:id` (body, assignee name; no `bodyHTML`)
-- [ ] Implement update ticket API endpoint (change status, assign agent)
+- [ ] Implement update ticket API endpoint (change status, assign agent) — assignment done: `PATCH /api/tickets/:id` with `{ assignedToId }`, picker on the detail page; status change still to do
 - [x] Create ticket list page with filtering and sorting — `/tickets`, TanStack Table with server-side sorting, status/category filters in the URL
-- [x] Create ticket detail page — `/tickets/:id`, read-only, opened from the subject in the list
+- [x] Create ticket detail page — `/tickets/:id`, opened from the subject in the list; the assignee can be changed there
 
 ## Phase 5: AI Features
 

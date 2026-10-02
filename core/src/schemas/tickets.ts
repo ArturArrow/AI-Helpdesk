@@ -79,3 +79,14 @@ export const ticketIdParamsSchema = z.object({
     .min(1, "id must be a positive integer")
     .max(2_147_483_647, "id must be a positive integer"),
 });
+
+// Body of PATCH /api/tickets/:id. null unassigns; the server checks the id is an active agent.
+export const updateTicketSchema = z.object({
+  assignedToId: z
+    .string({ error: "assignedToId must be a user id or null" })
+    .trim()
+    .min(1, "assignedToId must be a user id or null")
+    .nullable(),
+});
+
+export type UpdateTicketInput = z.infer<typeof updateTicketSchema>;

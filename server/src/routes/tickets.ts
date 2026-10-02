@@ -1,8 +1,9 @@
 import { Router } from "express";
-import { ticketIdParamsSchema, ticketListQuerySchema, UNCLASSIFIED } from "core/schemas/tickets";
+import { ticketIdParamsSchema, ticketListQuerySchema, UNCLASSIFIED, updateTicketSchema } from "core/schemas/tickets";
 import type { Prisma } from "../../generated/prisma/client";
+import { Role } from "../../generated/prisma/enums";
 import { prisma } from "../lib/db";
-import { validateParams, validateQuery } from "../lib/validate";
+import { validate, validateParams, validateQuery } from "../lib/validate";
 
 export const ticketsRouter = Router();
 
@@ -77,6 +78,30 @@ ticketsRouter.get("/", async (req, res) => {
   res.json({ tickets, total });
 });
 
+// Who a ticket can be assigned to: active agents. Declared before /:id, which would
+// otherwise take "assignees" as an id.
+const activeAgentWhere = { deletedAt: null, role: Role.agent } as const;
+
+ticketsRouter.get("/assignees", async (_req, res) => {
+  const agents = await prisma.user.findMany({
+    where: activeAgentWhere,
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+  });
+  res.json({ agents });
+});
+
+// assignedToId has no relation, so look the agent up separately. Display only: a
+// soft-deleted agent's name still shows on the tickets they had.
+type TicketDetailRow = Prisma.TicketGetPayload<{ select: typeof ticketDetailSelect }>;
+
+async function withAssignee({ assignedToId, ...ticket }: TicketDetailRow) {
+  const assignedTo = assignedToId
+    ? await prisma.user.findUnique({ where: { id: assignedToId }, select: { id: true, name: true } })
+    : null;
+  return { ...ticket, assignedTo };
+}
+
 ticketsRouter.get("/:id", async (req, res) => {
   const params = validateParams(ticketIdParamsSchema, req, res);
   if (!params) return;
@@ -86,11 +111,30 @@ ticketsRouter.get("/:id", async (req, res) => {
     res.status(404).json({ error: "Ticket not found" });
     return;
   }
-  // assignedToId has no relation, so look the agent up separately. Display only: a
-  // soft-deleted agent's name still shows on the tickets they had.
-  const { assignedToId, ...rest } = ticket;
-  const assignedTo = assignedToId
-    ? await prisma.user.findUnique({ where: { id: assignedToId }, select: { id: true, name: true } })
-    : null;
-  res.json({ ticket: { ...rest, assignedTo } });
+  res.json({ ticket: await withAssignee(ticket) });
+});
+
+// Assigns the ticket to an agent, or unassigns it with null. Any signed-in user may do it.
+ticketsRouter.patch("/:id", async (req, res) => {
+  const params = validateParams(ticketIdParamsSchema, req, res);
+  if (!params) return;
+  const body = validate(updateTicketSchema, req, res);
+  if (!body) return;
+  const { assignedToId } = body;
+
+  if (!(await prisma.ticket.findUnique({ where: { id: params.id }, select: { id: true } }))) {
+    res.status(404).json({ error: "Ticket not found" });
+    return;
+  }
+  if (assignedToId && !(await prisma.user.findUnique({ where: { id: assignedToId, ...activeAgentWhere }, select: { id: true } }))) {
+    res.status(400).json({ error: "assignedToId must be an active agent" });
+    return;
+  }
+
+  const ticket = await prisma.ticket.update({
+    where: { id: params.id },
+    data: { assignedToId },
+    select: ticketDetailSelect,
+  });
+  res.json({ ticket: await withAssignee(ticket) });
 });
