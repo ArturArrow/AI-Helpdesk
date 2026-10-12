@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 import { ADMIN, AGENT, signInViaApi } from '../fixtures/auth.js'
-import { assignTicketViaApi, createTicketViaWebhook } from '../fixtures/tickets.js'
+import { createTicketViaWebhook, updateTicketViaApi, type TicketUpdate } from '../fixtures/tickets.js'
 import { createUserViaApi, deleteUserViaApi, uniqueSuffix } from '../fixtures/users.js'
 import { inboundSecret } from '../fixtures/webhook.js'
 
@@ -255,9 +255,9 @@ async function expectFilter(request: APIRequestContext, params: FilterParams, ti
   expectRowsMatch(await listTickets(request, { ...params, pageSize: '100' }), params)
 }
 
-// The webhook creates only open, unclassified tickets and nothing changes them yet, so these tests
-// can show that a filter keeps or drops the test's own ticket and that every returned row matches.
-// The other statuses and categories may come back empty.
+// The webhook creates only open, unclassified tickets, so these tests show that a filter keeps or
+// drops the test's own new ticket and that every returned row matches. The other statuses and
+// categories may come back empty here; the PATCH tests below check that a changed ticket is listed.
 test.describe('GET /api/tickets filtering', () => {
   test('401 without a session, with valid or invalid filter params', async ({ request }) => {
     for (const params of [{ status: 'open', category: 'unclassified' }, { status: 'nope', category: 'nope' }]) {
@@ -750,7 +750,7 @@ test.describe('GET /api/tickets/:id', () => {
     await signInViaApi(request, ADMIN)
     const agent = await createUserViaApi(request, 'assignee')
     const ticket = await createTicketViaWebhook(request, 'detail-assigned')
-    await assignTicketViaApi(request, ticket.id, agent.id)
+    await updateTicketViaApi(request, ticket.id, { assignedToId: agent.id })
 
     await signInViaApi(request, AGENT)
     const res = await request.get(`/api/tickets/${ticket.id}`)
@@ -764,7 +764,7 @@ test.describe('GET /api/tickets/:id', () => {
     await signInViaApi(request, ADMIN)
     const agent = await createUserViaApi(request, 'deleted-assignee')
     const ticket = await createTicketViaWebhook(request, 'detail-deleted-assignee')
-    await assignTicketViaApi(request, ticket.id, agent.id)
+    await updateTicketViaApi(request, ticket.id, { assignedToId: agent.id })
     await deleteUserViaApi(request, agent.id)
 
     const res = await request.get(`/api/tickets/${ticket.id}`)
@@ -895,7 +895,7 @@ test.describe('PATCH /api/tickets/:id', () => {
       await signInViaApi(request, ADMIN)
       const agent = await createUserViaApi(request, 'patch-unassignee')
       const ticket = await createTicketViaWebhook(request, 'patch-unassign')
-      await assignTicketViaApi(request, ticket.id, agent.id)
+      await updateTicketViaApi(request, ticket.id, { assignedToId: agent.id })
       await signInViaApi(request, user)
 
       const res = await request.patch(`/api/tickets/${ticket.id}`, { data: { assignedToId: null } })
@@ -914,9 +914,9 @@ test.describe('PATCH /api/tickets/:id', () => {
     const first = await createUserViaApi(request, 'patch-first')
     const second = await createUserViaApi(request, 'patch-second')
     const ticket = await createTicketViaWebhook(request, 'patch-reassign')
-    await assignTicketViaApi(request, ticket.id, first.id)
+    await updateTicketViaApi(request, ticket.id, { assignedToId: first.id })
 
-    const reassigned = await assignTicketViaApi(request, ticket.id, second.id)
+    const reassigned = await updateTicketViaApi(request, ticket.id, { assignedToId: second.id })
     expect(reassigned.assignedTo).toEqual({ id: second.id, name: second.name })
   })
 
@@ -964,20 +964,192 @@ test.describe('PATCH /api/tickets/:id', () => {
     })
   }
 
-  const invalidBodies: [string, object][] = [
-    ['a missing assignedToId', {}],
-    ['an empty assignedToId', { assignedToId: '' }],
-    ['a blank assignedToId', { assignedToId: '   ' }],
-    ['a numeric assignedToId', { assignedToId: 123 }],
+  test('a missing assignedToId with no other field gets the empty-body 400, not the assignedToId one', async ({ request }) => {
+    const ticket = await createTicketViaWebhook(request, 'patch-missing-assignee')
+    await signInViaApi(request, AGENT)
+
+    const res = await request.patch(`/api/tickets/${ticket.id}`, { data: {} })
+    expect(res.status()).toBe(400)
+    expect(await res.json()).toEqual({ error: EMPTY_UPDATE_ERROR })
+  })
+})
+
+const UPDATE_STATUS_ERROR = 'status must be one of: open, resolved, closed'
+const UPDATE_CATEGORY_ERROR = 'category must be one of: general_question, technical_question, refund_request, or null'
+const EMPTY_UPDATE_ERROR = 'Provide at least one of assignedToId, status, category'
+
+type TicketDetail = {
+  id: number
+  status: string
+  category: string | null
+  assignedTo: { id: string; name: string } | null
+  updatedAt: string
+}
+
+// GETs /api/tickets/:id, asserts 200 and returns the ticket.
+async function getTicket(request: APIRequestContext, id: number): Promise<TicketDetail> {
+  const res = await request.get(`/api/tickets/${id}`)
+  expect(res.status(), `GET /api/tickets/${id}`).toBe(200)
+  return (await res.json()).ticket
+}
+
+// PATCHes `data` onto the ticket and asserts the 200 response is exactly `before` with `changes`
+// applied and a later updatedAt (so every other field is untouched), and that a following GET
+// returns the same ticket. Returns it, as the `before` of the next step.
+async function expectUpdated(
+  request: APIRequestContext,
+  before: TicketDetail,
+  data: TicketUpdate,
+  changes: Partial<TicketDetail>,
+): Promise<TicketDetail> {
+  const res = await request.patch(`/api/tickets/${before.id}`, { data })
+  expect(res.status(), `PATCH ${JSON.stringify(data)}`).toBe(200)
+  const body = await res.json()
+  expect(Object.keys(body)).toEqual(['ticket'])
+  expect(Object.keys(body.ticket).sort()).toEqual(DETAIL_KEYS)
+  expect(body.ticket).toEqual({ ...before, ...changes, updatedAt: expect.any(String) })
+  expect(Date.parse(body.ticket.updatedAt)).toBeGreaterThan(Date.parse(before.updatedAt))
+  expect(await getTicket(request, before.id)).toEqual(body.ticket)
+  return body.ticket
+}
+
+test.describe('PATCH /api/tickets/:id status and category', () => {
+  test('401 for a status change without a session; the ticket stays open', async ({ request }) => {
+    const ticket = await createTicketViaWebhook(request, 'patch-status-401')
+
+    const res = await request.patch(`/api/tickets/${ticket.id}`, { data: { status: 'resolved' } })
+    expect(res.status()).toBe(401)
+    expect(await res.json()).toEqual({ error: 'Unauthorized' })
+
+    await signInViaApi(request, AGENT)
+    expect((await getTicket(request, ticket.id)).status).toBe('open')
+  })
+
+  for (const user of [AGENT, ADMIN]) {
+    test(`the ${user.name.toLowerCase()} changes status open → resolved → closed → open, each returned, persisted and advancing updatedAt`, async ({ request }) => {
+      const ticket = await createTicketViaWebhook(request, 'patch-status')
+      await signInViaApi(request, user)
+      let current = await getTicket(request, ticket.id)
+      expect(current.status).toBe('open')
+
+      for (const status of ['resolved', 'closed', 'open']) {
+        current = await expectUpdated(request, current, { status }, { status })
+      }
+    })
+
+    test(`the ${user.name.toLowerCase()} classifies an unclassified ticket, changes the category and sets it back to null`, async ({ request }) => {
+      const ticket = await createTicketViaWebhook(request, 'patch-category')
+      await signInViaApi(request, user)
+      let current = await getTicket(request, ticket.id)
+      expect(current.category).toBeNull()
+
+      for (const category of ['general_question', 'refund_request', null]) {
+        current = await expectUpdated(request, current, { category }, { category })
+      }
+    })
+  }
+
+  test('a single-field PATCH leaves the other fields untouched', async ({ request }) => {
+    await signInViaApi(request, ADMIN)
+    const first = await createUserViaApi(request, 'patch-keep-first')
+    const second = await createUserViaApi(request, 'patch-keep-second')
+    const ticket = await createTicketViaWebhook(request, 'patch-keep')
+    await updateTicketViaApi(request, ticket.id, { assignedToId: first.id, status: 'resolved', category: 'technical_question' })
+    await signInViaApi(request, AGENT)
+    let current = await getTicket(request, ticket.id)
+    expect(current).toMatchObject({
+      status: 'resolved',
+      category: 'technical_question',
+      assignedTo: { id: first.id, name: first.name },
+    })
+
+    // Status keeps the assignee and category, category keeps the status and assignee, and
+    // (re)assigning or unassigning keeps the status and category.
+    current = await expectUpdated(request, current, { status: 'closed' }, { status: 'closed' })
+    current = await expectUpdated(request, current, { category: 'refund_request' }, { category: 'refund_request' })
+    current = await expectUpdated(request, current, { assignedToId: second.id }, { assignedTo: { id: second.id, name: second.name } })
+    current = await expectUpdated(request, current, { assignedToId: null }, { assignedTo: null })
+    expect(current).toMatchObject({ status: 'closed', category: 'refund_request' })
+  })
+
+  test('one PATCH with assignedToId, status and category applies all three', async ({ request }) => {
+    await signInViaApi(request, ADMIN)
+    const agent = await createUserViaApi(request, 'patch-all')
+    const ticket = await createTicketViaWebhook(request, 'patch-all')
+    await signInViaApi(request, AGENT)
+    const before = await getTicket(request, ticket.id)
+    expect(before).toMatchObject({ status: 'open', category: null, assignedTo: null })
+
+    await expectUpdated(
+      request,
+      before,
+      { assignedToId: agent.id, status: 'resolved', category: 'refund_request' },
+      { assignedTo: { id: agent.id, name: agent.name }, status: 'resolved', category: 'refund_request' },
+    )
+  })
+
+  const invalidBodies: [string, object, string][] = [
+    ['an empty body', {}, EMPTY_UPDATE_ERROR],
+    ['a body with only an unknown field', { subject: 'Changed' }, EMPTY_UPDATE_ERROR],
+    ['status "pending"', { status: 'pending' }, UPDATE_STATUS_ERROR],
+    ['status "Open" (case-sensitive)', { status: 'Open' }, UPDATE_STATUS_ERROR],
+    ['status null', { status: null }, UPDATE_STATUS_ERROR],
+    ['status 1', { status: 1 }, UPDATE_STATUS_ERROR],
+    ['category "billing"', { category: 'billing' }, UPDATE_CATEGORY_ERROR],
+    ['category "unclassified" (a list filter, not a value)', { category: 'unclassified' }, UPDATE_CATEGORY_ERROR],
+    ['category ""', { category: '' }, UPDATE_CATEGORY_ERROR],
+    ['category 1', { category: 1 }, UPDATE_CATEGORY_ERROR],
+    ['a valid status with an invalid category', { status: 'resolved', category: 'billing' }, UPDATE_CATEGORY_ERROR],
+    ['a valid category with an invalid status', { category: 'refund_request', status: 'pending' }, UPDATE_STATUS_ERROR],
+    ['an empty assignedToId', { assignedToId: '' }, ASSIGNED_TO_ID_ERROR],
+    ['a blank assignedToId', { assignedToId: '   ' }, ASSIGNED_TO_ID_ERROR],
+    ['a numeric assignedToId', { assignedToId: 123 }, ASSIGNED_TO_ID_ERROR],
+    ['a valid status with an empty assignedToId', { status: 'resolved', assignedToId: '' }, ASSIGNED_TO_ID_ERROR],
   ]
-  for (const [label, data] of invalidBodies) {
-    test(`${label} gets 400 ${JSON.stringify(ASSIGNED_TO_ID_ERROR)}`, async ({ request }) => {
+  for (const [label, data, error] of invalidBodies) {
+    test(`${label} gets 400 ${JSON.stringify(error)} and the ticket is unchanged`, async ({ request }) => {
       const ticket = await createTicketViaWebhook(request, 'patch-invalid-body')
       await signInViaApi(request, AGENT)
+      const before = await getTicket(request, ticket.id)
 
       const res = await request.patch(`/api/tickets/${ticket.id}`, { data })
       expect(res.status()).toBe(400)
-      expect(await res.json()).toEqual({ error: ASSIGNED_TO_ID_ERROR })
+      expect(await res.json()).toEqual({ error })
+
+      expect(await getTicket(request, ticket.id)).toEqual(before)
     })
   }
+
+  test(`a valid status and category with the admin's id as assignedToId get 400 ${JSON.stringify(ASSIGNEE_ERROR)} and change nothing`, async ({ request }) => {
+    const ticket = await createTicketViaWebhook(request, 'patch-partial-invalid')
+    await signInViaApi(request, ADMIN)
+    const adminId = await currentUserId(request)
+    await signInViaApi(request, AGENT)
+    const before = await getTicket(request, ticket.id)
+
+    const res = await request.patch(`/api/tickets/${ticket.id}`, {
+      data: { status: 'resolved', category: 'general_question', assignedToId: adminId },
+    })
+    expect(res.status()).toBe(400)
+    expect(await res.json()).toEqual({ error: ASSIGNEE_ERROR })
+
+    const after = await getTicket(request, ticket.id)
+    expect(after).toEqual(before)
+    expect(after).toMatchObject({ status: 'open', category: null, assignedTo: null })
+  })
+
+  test('GET /api/tickets filters follow a status and category change', async ({ request }) => {
+    const ticket = await createTicketViaWebhook(request, 'patch-filters')
+    await signInViaApi(request, AGENT)
+    await expectFilter(request, { status: 'resolved' }, ticket.id, ticket.subject, false)
+
+    await updateTicketViaApi(request, ticket.id, { status: 'resolved' })
+    await expectFilter(request, { status: 'resolved' }, ticket.id, ticket.subject, true)
+    await expectFilter(request, { status: 'open' }, ticket.id, ticket.subject, false)
+
+    await updateTicketViaApi(request, ticket.id, { category: 'refund_request' })
+    await expectFilter(request, { category: 'refund_request' }, ticket.id, ticket.subject, true)
+    await expectFilter(request, { category: 'unclassified' }, ticket.id, ticket.subject, false)
+    await expectFilter(request, { status: 'resolved', category: 'refund_request' }, ticket.id, ticket.subject, true)
+  })
 })

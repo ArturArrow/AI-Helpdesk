@@ -84,15 +84,18 @@ describe('TicketDetailPage', () => {
     renderAt('/tickets/42')
 
     expect(await screen.findByRole('heading', { name: 'Refund for order 1234', level: 1 })).toBeInTheDocument()
-    expect(screen.getByText('Open · Refund request')).toBeInTheDocument()
     expect(fields()).toEqual([
       ['From', 'Rita Refund <rita@example.com>'],
-      // The value is now a select; its trigger also holds an aria-hidden chevron.
+      // These values are selects; each trigger also holds an aria-hidden chevron.
       ['Assigned to', expect.stringContaining('Alan Agent')],
+      ['Status', expect.stringContaining('Open')],
+      ['Category', expect.stringContaining('Refund request')],
       ['Created', new Date(ticket.createdAt).toLocaleString()],
       ['Updated', new Date(ticket.updatedAt).toLocaleString()],
     ])
     expect(screen.getByRole('combobox', { name: 'Assigned to' })).toHaveTextContent('Alan Agent')
+    expect(screen.getByRole('combobox', { name: 'Status' })).toHaveTextContent('Open')
+    expect(screen.getByRole('combobox', { name: 'Category' })).toHaveTextContent('Refund request')
     expect(screen.getByText(/please refund my order/)).toBeInTheDocument()
     expect(document.querySelector('[aria-busy="true"]')).not.toBeInTheDocument()
   })
@@ -102,11 +105,12 @@ describe('TicketDetailPage', () => {
     renderAt('/tickets/42')
 
     await screen.findByRole('heading', { name: ticket.subject, level: 1 })
-    expect(screen.getByText('Unclassified')).toBeInTheDocument()
-    expect(screen.getByText(/^Resolved ·/)).toBeInTheDocument()
+    const category = screen.getByRole('combobox', { name: 'Category' })
+    expect(category).toHaveTextContent('Unclassified')
     for (const label of Object.values(categoryLabels)) {
-      expect(screen.queryByText(label, { exact: false })).not.toBeInTheDocument()
+      expect(category).not.toHaveTextContent(label)
     }
+    expect(screen.getByRole('combobox', { name: 'Status' })).toHaveTextContent('Resolved')
   })
 
   it('shows Unassigned for a ticket without an assignee', async () => {
@@ -290,7 +294,7 @@ describe('TicketDetailPage', () => {
       await choose(user, assigneeSelect(), 'Bea Agent')
 
       const alert = await screen.findByRole('alert')
-      expect(alert.textContent).toBe("Couldn't assign the ticket: Request failed (400)")
+      expect(alert.textContent).toBe("Couldn't update the ticket: Request failed (400)")
       expect(assigneeSelect()).toHaveTextContent('Alan Agent')
       expect(assigneeSelect()).not.toHaveTextContent('Bea Agent')
       expect(assigneeSelect()).toBeEnabled()
@@ -325,6 +329,126 @@ describe('TicketDetailPage', () => {
         'Alan Agent',
         'Bea Agent',
       ])
+    })
+  })
+
+  describe('status and category selects', () => {
+    function statusSelect() {
+      return screen.getByRole('combobox', { name: 'Status' })
+    }
+
+    function categorySelect() {
+      return screen.getByRole('combobox', { name: 'Category' })
+    }
+
+    // Waits for the agents too, so the assignee select's state is settled as well.
+    async function renderLoaded(t = ticket) {
+      mockTicketAndAgents(t)
+      renderAt('/tickets/42')
+      await waitFor(() => expect(screen.getByRole('combobox', { name: 'Assigned to' })).toBeEnabled())
+    }
+
+    it('lists the statuses, and Unclassified followed by the categories, when opened', async () => {
+      const user = userEvent.setup()
+      await renderLoaded()
+
+      await user.click(statusSelect())
+      const statuses = await screen.findByRole('listbox')
+      expect(within(statuses).getAllByRole('option').map((o) => o.textContent)).toEqual(['Open', 'Resolved', 'Closed'])
+      await user.keyboard('{Escape}')
+      await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument())
+
+      await user.click(categorySelect())
+      const categories = await screen.findByRole('listbox')
+      expect(within(categories).getAllByRole('option').map((o) => o.textContent)).toEqual([
+        'Unclassified',
+        'General question',
+        'Technical question',
+        'Refund request',
+      ])
+    })
+
+    it('sends only the new status and shows it in the trigger', async () => {
+      const user = userEvent.setup()
+      const patch = vi
+        .spyOn(axios, 'patch')
+        .mockResolvedValue({ data: { ticket: { ...ticket, status: TicketStatus.resolved } } })
+      await renderLoaded()
+
+      await choose(user, statusSelect(), 'Resolved')
+
+      expect(patch).toHaveBeenCalledExactlyOnceWith('/api/tickets/42', { status: TicketStatus.resolved })
+      await waitFor(() => expect(statusSelect()).toHaveTextContent('Resolved'))
+      expect(statusSelect()).not.toHaveTextContent('Open')
+      expect(statusSelect()).toBeEnabled()
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('sends only the new category and shows it in the trigger', async () => {
+      const user = userEvent.setup()
+      const patch = vi
+        .spyOn(axios, 'patch')
+        .mockResolvedValue({ data: { ticket: { ...ticket, category: TicketCategory.technical_question } } })
+      await renderLoaded()
+
+      await choose(user, categorySelect(), 'Technical question')
+
+      expect(patch).toHaveBeenCalledExactlyOnceWith('/api/tickets/42', { category: TicketCategory.technical_question })
+      await waitFor(() => expect(categorySelect()).toHaveTextContent('Technical question'))
+      expect(categorySelect()).not.toHaveTextContent('Refund request')
+    })
+
+    it('sends category: null for Unclassified', async () => {
+      const user = userEvent.setup()
+      const patch = vi.spyOn(axios, 'patch').mockResolvedValue({ data: { ticket: { ...ticket, category: null } } })
+      await renderLoaded()
+
+      await choose(user, categorySelect(), 'Unclassified')
+
+      expect(patch).toHaveBeenCalledExactlyOnceWith('/api/tickets/42', { category: null })
+      await waitFor(() => expect(categorySelect()).toHaveTextContent('Unclassified'))
+    })
+
+    it('disables all three selects while an update is pending', async () => {
+      const user = userEvent.setup()
+      vi.spyOn(axios, 'patch').mockReturnValue(new Promise(() => {}))
+      await renderLoaded()
+      expect(statusSelect()).toBeEnabled()
+      expect(categorySelect()).toBeEnabled()
+
+      await choose(user, statusSelect(), 'Closed')
+
+      await waitFor(() => expect(statusSelect()).toBeDisabled())
+      expect(categorySelect()).toBeDisabled()
+      expect(screen.getByRole('combobox', { name: 'Assigned to' })).toBeDisabled()
+    })
+
+    it('shows the shared alert and keeps the previous status when the update fails', async () => {
+      const user = userEvent.setup()
+      vi.spyOn(axios, 'patch').mockRejectedValue(httpError(500))
+      await renderLoaded()
+
+      await choose(user, statusSelect(), 'Closed')
+
+      const alert = await screen.findByRole('alert')
+      expect(alert.textContent).toBe("Couldn't update the ticket: Request failed (500)")
+      expect(statusSelect()).toHaveTextContent('Open')
+      expect(statusSelect()).not.toHaveTextContent('Closed')
+      expect(statusSelect()).toBeEnabled()
+    })
+
+    it('shows the shared alert and keeps the previous category when the update fails', async () => {
+      const user = userEvent.setup()
+      vi.spyOn(axios, 'patch').mockRejectedValue(httpError(400, { error: 'Invalid category' }))
+      await renderLoaded()
+
+      await choose(user, categorySelect(), 'General question')
+
+      const alert = await screen.findByRole('alert')
+      expect(alert.textContent).toBe("Couldn't update the ticket: Request failed (400)")
+      expect(categorySelect()).toHaveTextContent('Refund request')
+      expect(categorySelect()).not.toHaveTextContent('General question')
+      expect(categorySelect()).toBeEnabled()
     })
   })
 })

@@ -34,10 +34,17 @@ export async function createTicketViaWebhook(
   return { id: ticket.id, subject: data.subject, senderName: data.senderName, senderEmail: data.senderEmail }
 }
 
-// Assigns a ticket through PATCH /api/tickets/:id (null unassigns), asserts 200 and returns the
-// ticket. `request` must be signed in (as anyone).
-export async function assignTicketViaApi(request: APIRequestContext, ticketId: number, assignedToId: string | null) {
-  const res = await request.patch(`/api/tickets/${ticketId}`, { data: { assignedToId } })
-  expect(res.status(), `assign ticket ${ticketId} to ${assignedToId}`).toBe(200)
+export type TicketUpdate = {
+  assignedToId?: string | null
+  status?: string
+  category?: string | null
+}
+
+// Updates a ticket through PATCH /api/tickets/:id (any of assignedToId, status, category; null
+// unassigns or unclassifies), asserts 200 and returns the ticket. `request` must be signed in
+// (as anyone).
+export async function updateTicketViaApi(request: APIRequestContext, ticketId: number, data: TicketUpdate) {
+  const res = await request.patch(`/api/tickets/${ticketId}`, { data })
+  expect(res.status(), `update ticket ${ticketId} with ${JSON.stringify(data)}`).toBe(200)
   return (await res.json()).ticket
 }

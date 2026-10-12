@@ -114,13 +114,14 @@ ticketsRouter.get("/:id", async (req, res) => {
   res.json({ ticket: await withAssignee(ticket) });
 });
 
-// Assigns the ticket to an agent, or unassigns it with null. Any signed-in user may do it.
+// Changes the assignee, status and/or category; fields left out are kept. Any signed-in
+// user may do it.
 ticketsRouter.patch("/:id", async (req, res) => {
   const params = validateParams(ticketIdParamsSchema, req, res);
   if (!params) return;
   const body = validate(updateTicketSchema, req, res);
   if (!body) return;
-  const { assignedToId } = body;
+  const { assignedToId, status, category } = body;
 
   if (!(await prisma.ticket.findUnique({ where: { id: params.id }, select: { id: true } }))) {
     res.status(404).json({ error: "Ticket not found" });
@@ -133,7 +134,8 @@ ticketsRouter.patch("/:id", async (req, res) => {
 
   const ticket = await prisma.ticket.update({
     where: { id: params.id },
-    data: { assignedToId },
+    // Prisma leaves undefined fields unchanged.
+    data: { assignedToId, status, category },
     select: ticketDetailSelect,
   });
   res.json({ ticket: await withAssignee(ticket) });

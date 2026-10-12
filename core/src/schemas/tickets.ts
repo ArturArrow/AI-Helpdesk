@@ -80,13 +80,29 @@ export const ticketIdParamsSchema = z.object({
     .max(2_147_483_647, "id must be a positive integer"),
 });
 
-// Body of PATCH /api/tickets/:id. null unassigns; the server checks the id is an active agent.
-export const updateTicketSchema = z.object({
-  assignedToId: z
-    .string({ error: "assignedToId must be a user id or null" })
-    .trim()
-    .min(1, "assignedToId must be a user id or null")
-    .nullable(),
-});
+// Body of PATCH /api/tickets/:id. Each field is optional, but at least one must be given;
+// a null assignedToId unassigns and a null category marks the ticket unclassified. The server
+// checks that assignedToId is an active agent.
+export const updateTicketSchema = z
+  .object({
+    assignedToId: z
+      .string({ error: "assignedToId must be a user id or null" })
+      .trim()
+      .min(1, "assignedToId must be a user id or null")
+      .nullable()
+      .optional(),
+    status: z
+      .enum(TicketStatus, { error: `status must be one of: ${Object.values(TicketStatus).join(", ")}` })
+      .optional(),
+    category: z
+      .enum(TicketCategory, {
+        error: `category must be one of: ${Object.values(TicketCategory).join(", ")}, or null`,
+      })
+      .nullable()
+      .optional(),
+  })
+  .refine((body) => Object.keys(body).length > 0, {
+    error: "Provide at least one of assignedToId, status, category",
+  });
 
 export type UpdateTicketInput = z.infer<typeof updateTicketSchema>;
