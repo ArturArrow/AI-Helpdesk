@@ -1,5 +1,7 @@
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
+import userEvent, { type UserEvent } from '@testing-library/user-event'
 import axios, { AxiosError, type AxiosResponse } from 'axios'
+import { Role } from 'core/constants/role'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderWithQuery } from '@/test/render.tsx'
 import UsersPage from './UsersPage.tsx'
@@ -9,14 +11,14 @@ const users = [
     id: '1',
     name: 'Ada Admin',
     email: 'admin@example.com',
-    role: 'admin',
+    role: Role.admin,
     createdAt: '2026-01-15T12:00:00.000Z',
   },
   {
     id: '2',
     name: 'Alan Agent',
     email: 'agent@example.com',
-    role: 'agent',
+    role: Role.agent,
     createdAt: '2026-03-02T12:00:00.000Z',
   },
 ]
@@ -56,11 +58,57 @@ describe('UsersPage', () => {
       'Email',
       'Role',
       'Created',
+      'Actions',
     ])
 
     const [, ...bodyRows] = within(table).getAllByRole('row')
     expect(bodyRows.map((row) => within(row).getAllByRole('cell').map((td) => td.textContent))).toEqual(
-      users.map((u) => [u.name, u.email, u.role, new Date(u.createdAt).toLocaleDateString()]),
+      // The actions cell holds only an icon button, so it has no text.
+      users.map((u) => [u.name, u.email, u.role, new Date(u.createdAt).toLocaleDateString(), '']),
+    )
+  })
+
+  it('renders an edit button in each user row', async () => {
+    mockGet().mockResolvedValue({ data: { users } })
+    renderWithQuery(<UsersPage />)
+    await screen.findByRole('cell', { name: 'Ada Admin' })
+
+    const [, ...bodyRows] = within(screen.getByRole('table')).getAllByRole('row')
+    expect(bodyRows).toHaveLength(users.length)
+    bodyRows.forEach((row, i) => {
+      expect(within(row).getByRole('button', { name: `Edit ${users[i]!.name}` })).toBeInTheDocument()
+    })
+  })
+
+  it('opens the edit dialog for the row\'s user', async () => {
+    const user = userEvent.setup()
+    mockGet().mockResolvedValue({ data: { users } })
+    renderWithQuery(<UsersPage />)
+    await user.click(await screen.findByRole('button', { name: 'Edit Alan Agent' }))
+
+    expect(screen.getByRole('dialog', { name: 'Edit user' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Name')).toHaveValue('Alan Agent')
+    expect(screen.getByLabelText('Email')).toHaveValue('agent@example.com')
+  })
+
+  it('renders a delete button in agent rows but not in the admin row', async () => {
+    mockGet().mockResolvedValue({ data: { users } })
+    renderWithQuery(<UsersPage />)
+    await screen.findByRole('cell', { name: 'Ada Admin' })
+
+    const [, adminRow, agentRow] = within(screen.getByRole('table')).getAllByRole('row')
+    expect(within(adminRow!).queryByRole('button', { name: /^Delete/ })).not.toBeInTheDocument()
+    expect(within(agentRow!).getByRole('button', { name: 'Delete Alan Agent' })).toBeInTheDocument()
+  })
+
+  it('opens the delete confirmation for the row\'s user', async () => {
+    const user = userEvent.setup()
+    mockGet().mockResolvedValue({ data: { users } })
+    renderWithQuery(<UsersPage />)
+    await user.click(await screen.findByRole('button', { name: 'Delete Alan Agent' }))
+
+    expect(screen.getByRole('dialog', { name: 'Delete user' })).toHaveAccessibleDescription(
+      "Delete Alan Agent (agent@example.com)? They will be signed out and won't be able to sign in.",
     )
   })
 
@@ -89,5 +137,44 @@ describe('UsersPage', () => {
     renderWithQuery(<UsersPage />)
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/^Couldn't load users: Request failed$/)
+  })
+})
+
+describe('UsersPage new user dialog', () => {
+  function renderPage() {
+    const user = userEvent.setup()
+    mockGet().mockResolvedValue({ data: { users: [] } })
+    renderWithQuery(<UsersPage />)
+    return user
+  }
+
+  async function openDialog(user: UserEvent) {
+    await user.click(screen.getByRole('button', { name: 'New user' }))
+    return screen.getByRole('dialog', { name: 'New user' })
+  }
+
+  it('opens the create-user dialog from the New user button', async () => {
+    const user = renderPage()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    expect(await openDialog(user)).toHaveAccessibleDescription('Create an agent account.')
+  })
+
+  it('closes when the backdrop is clicked', async () => {
+    const user = renderPage()
+    await openDialog(user)
+    // The overlay is aria-hidden with no accessible name by design, so select it by its data-slot.
+    const overlay = document.querySelector('[data-slot="dialog-overlay"]')!
+    await user.click(overlay)
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('closes when Escape is pressed', async () => {
+    const user = renderPage()
+    await openDialog(user)
+    await user.keyboard('{Escape}')
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 })

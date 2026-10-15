@@ -48,11 +48,13 @@ test.describe('POST /api/auth/sign-in/email', () => {
 })
 
 test.describe('/api/users guard', () => {
-  // Only GET /api/users is routed; the rest fall through the guard to a 404 for the admin.
+  // The admin passes the guard: GET lists, POST rejects the password-less body (400), PATCH
+  // and DELETE find no such user (404), and the unrouted GET by id falls through to a 404.
   for (const [method, path, adminStatus] of [
     ['GET', '/api/users', 200],
     ['GET', '/api/users/some-id', 404],
-    ['POST', '/api/users', 404],
+    ['POST', '/api/users', 400],
+    ['PATCH', '/api/users/some-id', 404],
     ['DELETE', '/api/users/some-id', 404],
   ] as const) {
     test(`${method} ${path}: 401 unauthenticated, 403 agent, ${adminStatus} admin`, async ({
@@ -66,7 +68,10 @@ test.describe('/api/users guard', () => {
         await signInViaApi(agent, AGENT)
         await signInViaApi(admin, ADMIN)
         const call = (ctx: typeof anon) =>
-          ctx.fetch(path, { method, data: method === 'POST' ? { email: 'x@example.com' } : undefined })
+          ctx.fetch(path, {
+            method,
+            data: method === 'POST' || method === 'PATCH' ? { name: 'Nobody', email: 'x@example.com' } : undefined,
+          })
 
         const a = await call(anon)
         expect(a.status()).toBe(401)

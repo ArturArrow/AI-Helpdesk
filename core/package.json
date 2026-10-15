@@ -1,0 +1,19 @@
+{
+  "name": "core",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    "./constants/role": "./src/constants/role.ts",
+    "./constants/ticketCategory": "./src/constants/ticketCategory.ts",
+    "./constants/ticketStatus": "./src/constants/ticketStatus.ts",
+    "./schemas/tickets": "./src/schemas/tickets.ts",
+    "./schemas/users": "./src/schemas/users.ts"
+  },
+  "dependencies": {
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "typescript": "~6.0.2"
+  }
+}

@@ -1,3 +1,4 @@
+import { Role } from 'core/constants/role'
 import { Navigate, Outlet } from 'react-router'
 import { authClient } from '../lib/auth-client.ts'
 
@@ -5,7 +6,7 @@ import { authClient } from '../lib/auth-client.ts'
 function AdminRoute() {
   const { data: session } = authClient.useSession()
 
-  if (session?.user.role !== 'admin') {
+  if (session?.user.role !== Role.admin) {
     return <Navigate to="/" replace />
   }
 

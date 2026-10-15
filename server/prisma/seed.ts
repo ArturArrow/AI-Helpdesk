@@ -1,4 +1,5 @@
 import { auth } from "../src/lib/auth";
+import { Role } from "../generated/prisma/enums";
 import { prisma } from "../src/lib/db";
 
 // Creates (or repairs) the admin account. Safe to run repeatedly, including
@@ -46,7 +47,7 @@ const existing = await ctx.internalAdapter.findUserByEmail(email, { includeAccou
 
 if (!existing) {
   const user = await ctx.internalAdapter.createUser(
-    { email, name: ADMIN_NAME, emailVerified: true, role: "admin" },
+    { email, name: ADMIN_NAME, emailVerified: true, role: Role.admin },
     { method: "email-password" },
   );
   await linkCredential(user.id);
@@ -54,7 +55,7 @@ if (!existing) {
 } else {
   await prisma.user.update({
     where: { id: existing.user.id },
-    data: { role: "admin", emailVerified: true },
+    data: { role: Role.admin, emailVerified: true },
   });
 
   // Repairs an admin whose credential account was never created (e.g. a
