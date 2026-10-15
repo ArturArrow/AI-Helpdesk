@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
-import { TicketCategory } from 'core/constants/ticketCategory'
-import { TicketStatus } from 'core/constants/ticketStatus'
+import { categoryLabels, TicketCategory } from 'core/constants/ticketCategory'
+import { statusLabels, TicketStatus } from 'core/constants/ticketStatus'
 import type { UpdateTicketInput } from 'core/schemas/tickets'
 import { ArrowLeft } from 'lucide-react'
 import { Link, useLocation, useParams } from 'react-router'
@@ -16,7 +16,6 @@ import {
 } from '@/components/ui/select.tsx'
 import { Skeleton } from '@/components/ui/skeleton.tsx'
 import { errorMessage } from '@/lib/errorMessage.ts'
-import { categoryLabels, statusLabels } from '@/lib/ticketLabels.ts'
 
 type Assignee = { id: string; name: string }
 
@@ -83,84 +82,92 @@ function TicketDetailPage() {
       ) : ticket ? (
         <>
           <h1 className="text-2xl font-semibold wrap-break-word">{ticket.subject}</h1>
-          <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
-            <div>
-              <dt className="text-muted-foreground">From</dt>
-              <dd>
-                {ticket.senderName} &lt;{ticket.senderEmail}&gt;
-              </dd>
+          <div className="grid gap-6 lg:grid-cols-[1fr_16rem]">
+            <div className="min-w-0 space-y-6">
+              <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
+                <div>
+                  <dt className="text-muted-foreground">From</dt>
+                  <dd className="wrap-break-word">
+                    {ticket.senderName} &lt;{ticket.senderEmail}&gt;
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">Created</dt>
+                  <dd>{new Date(ticket.createdAt).toLocaleString()}</dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">Updated</dt>
+                  <dd>{new Date(ticket.updatedAt).toLocaleString()}</dd>
+                </div>
+              </dl>
+              <Card>
+                <CardContent className="text-sm wrap-break-word whitespace-pre-wrap">{ticket.body}</CardContent>
+              </Card>
             </div>
-            <div>
-              <dt className="text-muted-foreground">Assigned to</dt>
-              <dd>
-                <AssigneeSelect
-                  assignedTo={ticket.assignedTo}
-                  disabled={update.isPending}
-                  onChange={(assignedToId) => update.mutate({ assignedToId })}
-                />
-              </dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">Status</dt>
-              <dd>
-                <Select<TicketStatus>
-                  items={statusItems}
-                  value={ticket.status}
-                  onValueChange={(status) => status && update.mutate({ status })}
-                  disabled={update.isPending}
-                >
-                  <SelectTrigger aria-label="Status" className="w-56">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {statusItems.map((item) => (
-                      <SelectItem key={item.value} value={item.value}>
-                        {item.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">Category</dt>
-              <dd>
-                <Select<TicketCategory>
-                  items={categoryItems}
-                  value={ticket.category}
-                  onValueChange={(category) => update.mutate({ category })}
-                  disabled={update.isPending}
-                >
-                  <SelectTrigger aria-label="Category" className="w-56">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {categoryItems.map((item) => (
-                      <SelectItem key={item.value ?? ''} value={item.value}>
-                        {item.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">Created</dt>
-              <dd>{new Date(ticket.createdAt).toLocaleString()}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">Updated</dt>
-              <dd>{new Date(ticket.updatedAt).toLocaleString()}</dd>
-            </div>
-          </dl>
-          {update.error && (
-            <p role="alert" className="text-sm text-destructive">
-              Couldn't update the ticket: {errorMessage(update.error)}
-            </p>
-          )}
-          <Card>
-            <CardContent className="text-sm wrap-break-word whitespace-pre-wrap">{ticket.body}</CardContent>
-          </Card>
+            <aside aria-label="Ticket properties" className="space-y-4">
+              <dl className="space-y-4 text-sm">
+                <div className="space-y-1">
+                  <dt className="text-muted-foreground">Assigned to</dt>
+                  <dd>
+                    <AssigneeSelect
+                      assignedTo={ticket.assignedTo}
+                      disabled={update.isPending}
+                      onChange={(assignedToId) => update.mutate({ assignedToId })}
+                    />
+                  </dd>
+                </div>
+                <div className="space-y-1">
+                  <dt className="text-muted-foreground">Status</dt>
+                  <dd>
+                    <Select<TicketStatus>
+                      items={statusItems}
+                      value={ticket.status}
+                      onValueChange={(status) => status && update.mutate({ status })}
+                      disabled={update.isPending}
+                    >
+                      <SelectTrigger aria-label="Status" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {statusItems.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>
+                            {item.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </dd>
+                </div>
+                <div className="space-y-1">
+                  <dt className="text-muted-foreground">Category</dt>
+                  <dd>
+                    <Select<TicketCategory>
+                      items={categoryItems}
+                      value={ticket.category}
+                      onValueChange={(category) => update.mutate({ category })}
+                      disabled={update.isPending}
+                    >
+                      <SelectTrigger aria-label="Category" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {categoryItems.map((item) => (
+                          <SelectItem key={item.value ?? ''} value={item.value}>
+                            {item.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </dd>
+                </div>
+              </dl>
+              {update.error && (
+                <p role="alert" className="text-sm text-destructive">
+                  Couldn't update the ticket: {errorMessage(update.error)}
+                </p>
+              )}
+            </aside>
+          </div>
         </>
       ) : (
         <div aria-busy="true" className="space-y-4">
@@ -210,7 +217,7 @@ function AssigneeSelect({
         onValueChange={onChange}
         disabled={!agents || disabled}
       >
-        <SelectTrigger aria-label="Assigned to" className="w-56">
+        <SelectTrigger aria-label="Assigned to" className="w-full">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

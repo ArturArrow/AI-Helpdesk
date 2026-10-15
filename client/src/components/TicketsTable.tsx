@@ -7,7 +7,7 @@ import {
   type SortingState,
 } from '@tanstack/react-table'
 import axios from 'axios'
-import { TicketCategory } from 'core/constants/ticketCategory'
+import { categoryLabels, TicketCategory } from 'core/constants/ticketCategory'
 import { TicketStatus } from 'core/constants/ticketStatus'
 import {
   DEFAULT_TICKET_PAGE_SIZE,
@@ -28,7 +28,6 @@ import {
   TableRow,
 } from '@/components/ui/table.tsx'
 import { errorMessage } from '@/lib/errorMessage.ts'
-import { categoryLabels } from '@/lib/ticketLabels.ts'
 
 export type Ticket = {
   id: number

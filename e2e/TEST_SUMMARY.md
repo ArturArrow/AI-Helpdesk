@@ -2,9 +2,9 @@
 
 ## Last run
 
-- **Date:** 2026-10-02
+- **Date:** 2026-10-15
 - **Discovered (`--list`):** 198 tests in 7 files (api-auth 16, login 6, routing 5, session 7, tickets 125, users 22, webhook 17)
-- **Result:** not run since adding the PATCH `/api/tickets/:id` status and category tests. Before that change (and before the assignees and assignment tests, which have not run either): 155 passed, 0 failed, 40.3s (chromium).
+- **Result:** 198 passed, 0 failed, 54.2s (chromium).
 
 ## tests/login.spec.ts
 

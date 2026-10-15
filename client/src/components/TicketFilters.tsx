@@ -1,5 +1,5 @@
-import { TicketCategory } from 'core/constants/ticketCategory'
-import { TicketStatus } from 'core/constants/ticketStatus'
+import { categoryLabels, TicketCategory } from 'core/constants/ticketCategory'
+import { statusLabels, TicketStatus } from 'core/constants/ticketStatus'
 import { UNCLASSIFIED, type TicketCategoryFilter } from 'core/schemas/tickets'
 import { Search } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -12,7 +12,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select.tsx'
-import { categoryLabels, statusLabels } from '@/lib/ticketLabels.ts'
 
 export type TicketFilterValues = {
   status?: TicketStatus

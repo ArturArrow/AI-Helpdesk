@@ -1,11 +1,10 @@
 import { getDefaultNormalizer, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import axios, { AxiosError } from 'axios'
-import { TicketCategory } from 'core/constants/ticketCategory'
+import { categoryLabels, TicketCategory } from 'core/constants/ticketCategory'
 import { TicketStatus } from 'core/constants/ticketStatus'
 import { Route, Routes, useLocation, type InitialEntry } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { categoryLabels } from '@/lib/ticketLabels.ts'
 import { httpError } from '@/test/http.ts'
 import { renderWithRouter } from '@/test/render.tsx'
 import { choose } from '@/test/select.ts'
@@ -63,6 +62,10 @@ function fields() {
   return terms.map((term, i) => [term, values[i]])
 }
 
+function sidebar() {
+  return screen.getByRole('complementary', { name: 'Ticket properties' })
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
 })
@@ -86,18 +89,31 @@ describe('TicketDetailPage', () => {
     expect(await screen.findByRole('heading', { name: 'Refund for order 1234', level: 1 })).toBeInTheDocument()
     expect(fields()).toEqual([
       ['From', 'Rita Refund <rita@example.com>'],
+      ['Created', new Date(ticket.createdAt).toLocaleString()],
+      ['Updated', new Date(ticket.updatedAt).toLocaleString()],
       // These values are selects; each trigger also holds an aria-hidden chevron.
       ['Assigned to', expect.stringContaining('Alan Agent')],
       ['Status', expect.stringContaining('Open')],
       ['Category', expect.stringContaining('Refund request')],
-      ['Created', new Date(ticket.createdAt).toLocaleString()],
-      ['Updated', new Date(ticket.updatedAt).toLocaleString()],
     ])
     expect(screen.getByRole('combobox', { name: 'Assigned to' })).toHaveTextContent('Alan Agent')
     expect(screen.getByRole('combobox', { name: 'Status' })).toHaveTextContent('Open')
     expect(screen.getByRole('combobox', { name: 'Category' })).toHaveTextContent('Refund request')
     expect(screen.getByText(/please refund my order/)).toBeInTheDocument()
     expect(document.querySelector('[aria-busy="true"]')).not.toBeInTheDocument()
+  })
+
+  it('puts the editable fields in the Ticket properties sidebar and the rest outside it', async () => {
+    mockTicketAndAgents(ticket)
+    renderAt('/tickets/42')
+    await screen.findByRole('heading', { name: ticket.subject, level: 1 })
+
+    for (const name of ['Assigned to', 'Status', 'Category']) {
+      expect(sidebar()).toContainElement(screen.getByRole('combobox', { name }))
+    }
+    for (const label of ['From', 'Created', 'Updated']) {
+      expect(sidebar()).not.toContainElement(screen.getByText(label))
+    }
   })
 
   it('shows Unclassified for a ticket without a category', async () => {
@@ -295,6 +311,7 @@ describe('TicketDetailPage', () => {
 
       const alert = await screen.findByRole('alert')
       expect(alert.textContent).toBe("Couldn't update the ticket: Request failed (400)")
+      expect(sidebar()).toContainElement(alert)
       expect(assigneeSelect()).toHaveTextContent('Alan Agent')
       expect(assigneeSelect()).not.toHaveTextContent('Bea Agent')
       expect(assigneeSelect()).toBeEnabled()
@@ -432,6 +449,7 @@ describe('TicketDetailPage', () => {
 
       const alert = await screen.findByRole('alert')
       expect(alert.textContent).toBe("Couldn't update the ticket: Request failed (500)")
+      expect(sidebar()).toContainElement(alert)
       expect(statusSelect()).toHaveTextContent('Open')
       expect(statusSelect()).not.toHaveTextContent('Closed')
       expect(statusSelect()).toBeEnabled()
@@ -446,6 +464,7 @@ describe('TicketDetailPage', () => {
 
       const alert = await screen.findByRole('alert')
       expect(alert.textContent).toBe("Couldn't update the ticket: Request failed (400)")
+      expect(sidebar()).toContainElement(alert)
       expect(categorySelect()).toHaveTextContent('Refund request')
       expect(categorySelect()).not.toHaveTextContent('General question')
       expect(categorySelect()).toBeEnabled()
