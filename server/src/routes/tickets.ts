@@ -4,8 +4,12 @@ import type { Prisma } from "../../generated/prisma/client";
 import { Role } from "../../generated/prisma/enums";
 import { prisma } from "../lib/db";
 import { validate, validateParams, validateQuery } from "../lib/validate";
+import { repliesRouter } from "./replies";
 
 export const ticketsRouter = Router();
+
+// A ticket's thread. Mounted here so it sits behind the same requireAuth as the tickets.
+ticketsRouter.use("/:id/replies", repliesRouter);
 
 // Explicit select: the list doesn't need the bodies, and new columns aren't exposed by default.
 const ticketListSelect = {

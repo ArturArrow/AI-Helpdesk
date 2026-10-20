@@ -7,8 +7,8 @@ import {
   type SortingState,
 } from '@tanstack/react-table'
 import axios from 'axios'
-import { categoryLabels, TicketCategory } from 'core/constants/ticketCategory'
-import { TicketStatus } from 'core/constants/ticketStatus'
+import type { Ticket } from 'core/constants/ticket'
+import { categoryLabels } from 'core/constants/ticketCategory'
 import {
   DEFAULT_TICKET_PAGE_SIZE,
   type TicketListQuery,
@@ -28,16 +28,6 @@ import {
   TableRow,
 } from '@/components/ui/table.tsx'
 import { errorMessage } from '@/lib/errorMessage.ts'
-
-export type Ticket = {
-  id: number
-  subject: string
-  senderName: string
-  senderEmail: string
-  status: TicketStatus
-  category: TicketCategory | null
-  createdAt: string
-}
 
 const features = tableFeatures({ rowSortingFeature })
 const columnHelper = createColumnHelper<typeof features, Ticket>()
