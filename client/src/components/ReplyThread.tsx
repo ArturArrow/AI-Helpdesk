@@ -1,14 +1,14 @@
 import { useQuery } from '@tanstack/react-query'
 import axios from 'axios'
 import { ReplySender, replySenderLabels } from 'core/constants/replySender'
-import type { TicketDetailData } from '@/components/TicketDetail.tsx'
-import { Card, CardContent } from '@/components/ui/card.tsx'
+import type { TicketDetailData } from 'core/constants/ticket'
+import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card.tsx'
 import { Skeleton } from '@/components/ui/skeleton.tsx'
 import { errorMessage } from '@/lib/errorMessage.ts'
 import { repliesQueryKey } from '@/lib/replies.ts'
 import { cn } from '@/lib/utils.ts'
 
-export type Reply = {
+export interface Reply {
   id: number
   body: string
   sender: ReplySender
@@ -51,17 +51,17 @@ function ReplyThread({ ticket }: { ticket: Pick<TicketDetailData, 'id'> }) {
             return (
               <li key={reply.id} className={fromAgent ? 'sm:ml-12' : 'sm:mr-12'}>
                 <Card className={cn(fromAgent && 'bg-muted')}>
-                  <CardContent className="space-y-2 text-sm">
-                    <p className="flex flex-wrap items-baseline gap-x-2">
-                      {fromAgent && reply.author && <span className="font-medium">{reply.author.name}</span>}
-                      <span className="text-muted-foreground">{replySenderLabels[reply.sender]}</span>
-                      <span className="text-muted-foreground">·</span>
-                      <time dateTime={reply.createdAt} className="text-muted-foreground">
-                        {new Date(reply.createdAt).toLocaleString()}
-                      </time>
-                    </p>
-                    <p className="wrap-break-word whitespace-pre-wrap">{reply.body}</p>
-                  </CardContent>
+                  <CardHeader>
+                    <CardDescription className="flex flex-wrap items-baseline gap-x-2">
+                      {fromAgent && reply.author && (
+                        <span className="font-medium text-foreground">{reply.author.name}</span>
+                      )}
+                      <span>{replySenderLabels[reply.sender]}</span>
+                      <span>·</span>
+                      <time dateTime={reply.createdAt}>{new Date(reply.createdAt).toLocaleString()}</time>
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="text-sm wrap-break-word whitespace-pre-wrap">{reply.body}</CardContent>
                 </Card>
               </li>
             )

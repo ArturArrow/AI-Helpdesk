@@ -1,14 +1,5 @@
-import type { Ticket } from '@/components/TicketsTable.tsx'
+import type { TicketDetailData } from 'core/constants/ticket'
 import { Card, CardContent } from '@/components/ui/card.tsx'
-
-export type Assignee = { id: string; name: string }
-
-// A ticket as GET /api/tickets/:id returns it.
-export type TicketDetailData = Ticket & {
-  body: string
-  updatedAt: string
-  assignedTo: Assignee | null
-}
 
 type TicketDetailProps = {
   ticket: Pick<TicketDetailData, 'senderName' | 'senderEmail' | 'createdAt' | 'body' | 'updatedAt'>

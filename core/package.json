@@ -6,6 +6,7 @@
   "exports": {
     "./constants/replySender": "./src/constants/replySender.ts",
     "./constants/role": "./src/constants/role.ts",
+    "./constants/ticket": "./src/constants/ticket.ts",
     "./constants/ticketCategory": "./src/constants/ticketCategory.ts",
     "./constants/ticketStatus": "./src/constants/ticketStatus.ts",
     "./schemas/replies": "./src/schemas/replies.ts",

@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
+import type { Assignee, TicketDetailData } from 'core/constants/ticket'
 import { categoryLabels, TicketCategory } from 'core/constants/ticketCategory'
 import { statusLabels, TicketStatus } from 'core/constants/ticketStatus'
 import type { UpdateTicketInput } from 'core/schemas/tickets'
-import type { Assignee, TicketDetailData } from '@/components/TicketDetail.tsx'
 import {
   Select,
   SelectContent,
