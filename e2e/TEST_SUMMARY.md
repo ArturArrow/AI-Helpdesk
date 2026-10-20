@@ -3,8 +3,8 @@
 ## Last run
 
 - **Date:** 2026-10-15
-- **Discovered (`--list`):** 198 tests in 7 files (api-auth 16, login 6, routing 5, session 7, tickets 125, users 22, webhook 17)
-- **Result:** 198 passed, 0 failed, 54.2s (chromium).
+- **Discovered (`--list`):** 228 tests in 8 files (api-auth 16, login 6, replies 30, routing 5, session 7, tickets 125, users 22, webhook 17)
+- **Result:** 228 passed, 0 failed, 56.5s (chromium).
 
 ## tests/login.spec.ts
 
@@ -192,6 +192,34 @@ Status and category (PATCH `/api/tickets/:id` with `status` and/or `category`). 
 - A valid status and category with the admin's id as `assignedToId` get 400 `"assignedToId must be an active agent"`, and neither status nor category changes.
 - GET `/api/tickets` filters follow the changes: after `status: resolved` the ticket is listed under `status=resolved` and not `status=open`; after `category: refund_request` it is listed under `category=refund_request` and `resolved` + `refund_request`, not under `unclassified`. Every row of each filtered page of 100 matches.
 
+## tests/replies.spec.ts
+
+GET and POST `/api/tickets/:id/replies`, at the API only (the thread and reply form are covered by component tests). Each test creates its own ticket through the webhook, so a thread holds exactly the replies the test posted.
+
+Without a session:
+
+- GET gets 401 `{"error":"Unauthorized"}` for an existing id and for `abc` (auth runs before validation).
+- POST gets 401 for an existing id and for `abc`, and the ticket's thread stays `[]`.
+
+POST:
+
+- The agent and the admin (one test each) reply with a padded body: 201 with exactly `{ reply }`, keys `id`, `body`, `sender`, `createdAt`, `author`; the body trimmed, `sender` `agent`, `author` exactly `{ id, name }` of the signed-in user (id from `/api/me`), a numeric id and a parseable `createdAt`. A following GET returns exactly that reply.
+- A body with `sender: "customer"` and the admin's id as `authorId`, posted by the agent, is stored with `sender` `agent` and the agent as author.
+- A body of exactly 10,000 characters gets 201 and is stored whole.
+- 400, with nothing stored (one test each): an empty, whitespace-only, missing, numeric or null body gets `"Reply can't be empty"`; a 10,001-character body gets `"Reply is too long"`.
+- Ids `abc`, `0`, `-1`, `1.5` and `2147483648` get 400 `{"error":"id must be a positive integer"}` (one test each).
+- An invalid id with an empty body gets the id error (params are validated before the body).
+- `2147483647` (valid but nonexistent) gets 404 `{"error":"Ticket not found"}`.
+
+GET:
+
+- A ticket with no replies returns `{ replies: [] }`.
+- Replies posted by the agent, the admin, then the agent are returned in that order (oldest first), each equal to its POST response, with ascending `createdAt`.
+- Replies posted to two tickets are returned only on their own ticket; a third ticket returns `[]`.
+- The agent and the admin (one test each) read a reply written by the other.
+- Ids `abc`, `0`, `-1`, `1.5` and `2147483648` get 400 with the id message (one test each).
+- `2147483647` gets 404 `{"error":"Ticket not found"}`.
+
 ## Harness helpers
 
 - **`fixtures/auth.ts`:**
@@ -210,6 +238,7 @@ Status and category (PATCH `/api/tickets/:id` with `status` and/or `category`). 
   - `users.spec.ts` keeps its own `userRow`, `openNewUserDialog`, `submitNewUser`, `openEditDialog`, `openDeleteDialog` and `postSignIn`, which only it uses.
 - **`fixtures/webhook.ts`:** `inboundSecret()` reads `INBOUND_EMAIL_SECRET` from `server/.env.test` (the file `start:test` loads) with `node:util`'s `parseEnv`, so the tests and the server share one value. It reads lazily and throws a clear error if the value is missing, so other specs still load. `webhook.spec.ts` keeps its own `validEmail` (unique sender per call), `uniqueMessageId`, `postInbound`, `expectUnauthorized` and `expectCreated`.
 - **`fixtures/tickets.ts`:** `createTicketViaWebhook(request, label, overrides?)` posts a unique email (subject `E2E <label> <suffix>`, unique sender, body `Please help.`) to the inbound webhook with the secret, asserts 201 and returns the ticket's `id`, `subject`, `senderName` and `senderEmail`. `overrides` sets `subject`, `senderName`, `senderEmail` or `body` exactly, for the sorting and search tests. The defaults contain no `%`, `_` or `\`. It needs no session. `updateTicketViaApi(request, ticketId, data)` sends any of `assignedToId`, `status`, `category` (type `TicketUpdate`; `null` unassigns or unclassifies) through PATCH `/api/tickets/:id`, asserts 200 and returns the ticket; the request must be signed in. `tickets.spec.ts` keeps its own `getTicket(request, id)` (GET `/api/tickets/:id`, asserts 200, returns the ticket), `expectUpdated(request, before, data, changes)` (PATCH, then the response equals `before` plus `changes` with a later `updatedAt`, and a GET matches), `currentUserId(request)` (the signed-in user's id from `/api/me`), `listAssignees(request)` (GET `/api/tickets/assignees`, asserts 200 and exactly `{ agents }`), `getTicketPage(request, params)` (GET with sort, filter, search and paging params, asserts 200, returns `{ tickets, total }`), `listTickets(request, params)` (the same, returning only `tickets`), `expectInOrder(tickets, ids)` (the ids are listed in that relative order), `searchOverride(field, token)` (puts a token into one field) `expectAllContain(tickets, text)` (every row holds the text in subject, sender name or email), `expectRowsMatch(tickets, filters)` and `expectFilter(request, filters, id, subject, listed)` (the filter keeps or drops the ticket, and every row of a page of 100 matches), and `createTicketsWithToken(request, token, labels)` (one ticket per label, subject `<token> <label>`).
+- `replies.spec.ts` keeps its own `currentUserId(request)`, `listReplies(request, ticketId)` (GET, asserts 200 and exactly `{ replies }`) and `postReply(request, ticketId, body)` (POST, asserts 201 and exactly `{ reply }`), which only it uses.
 - Helpers are plain exported functions: no page objects and no `test.extend` fixtures.
 - **`global-setup.ts`:** runs the test-DB guard, `prisma migrate reset --force`, the admin seed, then `seed-agent.ts`. Each run starts with two users: the admin and the agent.
 - **`seed-agent.ts`:** creates the agent through Better Auth's `internalAdapter`, like `prisma/seed.ts` creates the admin. It reads the credentials from `E2E_AGENT_*` environment variables and skips if the agent already exists.
@@ -240,7 +269,12 @@ Status and category (PATCH `/api/tickets/:id` with `status` and/or `category`). 
 - **Search on `body` rows:** the list doesn't return `body`, so the body-search test can only check which ids come back, not the matched text.
 - **The assignment UI on the detail page:** covered by component tests, not E2E.
 - **Concurrent assignment:** two PATCHes racing on one ticket (last write wins) can't be observed from a serial test.
-- **Not built yet:** restoring a deleted user, ticket creation through the API and updates to content (subject, body; PATCH ignores unknown fields), AI features, email, and the dashboard.
+- **The replies UI on the detail page** (`ReplyThread`, `ReplyForm`): covered by component tests, not E2E.
+- **Customer replies and the `id asc` tie-break:** only `POST` writes replies and it always stores `sender: agent`, so a `customer` reply with `author: null` can't be created through the API, and two replies with the same `createdAt` can't be forced from a serial test.
+- **Cascade delete of replies with their ticket:** there is no endpoint that deletes tickets.
+- **A soft-deleted author on a reply:** not tested; the route's `author` select doesn't filter `deletedAt`, so such a reply would presumably still show the author.
+- **A body padded with whitespace past 10,000 characters:** whether the length limit applies to the trimmed text isn't tested.
+- **Not built yet:** sending replies to the customer (no email provider), restoring a deleted user, ticket creation through the API and updates to content (subject, body; PATCH ignores unknown fields), AI features, email, and the dashboard.
 
 ## Open questions
 
@@ -257,4 +291,5 @@ Status and category (PATCH `/api/tickets/:id` with `status` and/or `category`). 
 - **Resolved: no varied-ticket seed needed.** PATCH now sets status and category, so tests can make the tickets they need through the API; one filter test does.
 - **Unknown PATCH fields are dropped silently:** zod strips them, so `{ subject: "x" }` alone gets the empty-body 400 (`tickets.spec.ts` records this), while `{ status, subject }` would get 200 with the subject ignored (not tested). A `.strict()` schema would reject them instead, if wanted.
 - **Search is a sequential `ILIKE` scan:** the route comment says so; fine at this size, a trigram index or full-text search if the table grows. Not something a test checks.
+- **Replies are stored only:** POST answers 201 but nothing is sent to the customer yet (no email provider). The tests record storage only.
 - **App changes needed:** none to run the current suite. Every locator uses an accessible label, role or text.

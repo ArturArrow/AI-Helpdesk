@@ -36,6 +36,7 @@
 - [x] Implement update ticket API endpoint (change status, assign agent) — `PATCH /api/tickets/:id` with any of `assignedToId`, `status`, `category`; selects on the detail page
 - [x] Create ticket list page with filtering and sorting — `/tickets`, TanStack Table with server-side sorting, status/category filters in the URL
 - [x] Create ticket detail page — `/tickets/:id`, opened from the subject in the list; assignee, status and category can be changed there
+- [x] Reply thread on the ticket detail page — `Reply` model (`sender`: agent/customer), `GET`/`POST /api/tickets/:id/replies`; replies are stored, not emailed yet
 
 ## Phase 5: AI Features
 
@@ -50,8 +51,8 @@
 
 - [ ] Set up email provider (SendGrid/Mailgun)
 - [x] Implement inbound email webhook to create tickets — `POST /api/webhooks/inbound-email`, provider-neutral JSON behind `X-Inbound-Secret`; no provider adapter yet
-- [ ] Implement outbound email sending when an agent replies
-- [ ] Handle email threading (replies linked to existing tickets)
+- [ ] Implement outbound email sending when an agent replies (replies are already stored via `POST /api/tickets/:id/replies`)
+- [ ] Handle email threading (replies linked to existing tickets) — store them as `Reply` with `sender: customer`
 
 ## Phase 7: Dashboard
 

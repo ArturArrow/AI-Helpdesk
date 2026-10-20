@@ -1,6 +1,7 @@
 import { getDefaultNormalizer, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import axios, { AxiosError } from 'axios'
+import { ReplySender } from 'core/constants/replySender'
 import { categoryLabels, TicketCategory } from 'core/constants/ticketCategory'
 import { TicketStatus } from 'core/constants/ticketStatus'
 import { Route, Routes, useLocation, type InitialEntry } from 'react-router'
@@ -32,11 +33,15 @@ function mockGet() {
   return vi.spyOn(axios, 'get')
 }
 
-// Answers both requests the page makes: the ticket, and the agents for the assignee select.
+// Answers the three requests the page makes: the ticket, its replies, and the agents for the
+// assignee select. Any other URL fails the request, so a stray GET can't pass unnoticed.
 function mockTicketAndAgents(t: typeof ticket) {
-  return mockGet().mockImplementation(async (url) =>
-    url === '/api/tickets/assignees' ? { data: { agents } } : { data: { ticket: t } },
-  )
+  return mockGet().mockImplementation(async (url) => {
+    if (url === '/api/tickets/assignees') return { data: { agents } }
+    if (url === `/api/tickets/${t.id}/replies`) return { data: { replies: [] } }
+    if (url === `/api/tickets/${t.id}`) return { data: { ticket: t } }
+    throw new Error(`Unexpected GET ${url}`)
+  })
 }
 
 // Stands in for the list page, showing where the back link led.
@@ -71,14 +76,15 @@ afterEach(() => {
 })
 
 describe('TicketDetailPage', () => {
-  it('requests the ticket for the id in the URL', async () => {
+  it('requests the ticket and its replies for the id in the URL', async () => {
     const get = mockTicketAndAgents(ticket)
     renderAt('/tickets/42')
 
-    await screen.findByRole('heading', { name: ticket.subject, level: 1 })
+    await screen.findByText('No replies yet.')
     // The other request is the assignee select's agent list.
     expect(get.mock.calls.map(([url]) => url).filter((url) => url !== '/api/tickets/assignees')).toEqual([
       '/api/tickets/42',
+      '/api/tickets/42/replies',
     ])
   })
 
@@ -100,6 +106,8 @@ describe('TicketDetailPage', () => {
     expect(screen.getByRole('combobox', { name: 'Status' })).toHaveTextContent('Open')
     expect(screen.getByRole('combobox', { name: 'Category' })).toHaveTextContent('Refund request')
     expect(screen.getByText(/please refund my order/)).toBeInTheDocument()
+    // Once the replies have loaded too, nothing on the page is busy.
+    await screen.findByText('No replies yet.')
     expect(document.querySelector('[aria-busy="true"]')).not.toBeInTheDocument()
   })
 
@@ -279,9 +287,11 @@ describe('TicketDetailPage', () => {
     })
 
     it('is disabled while the agents are loading', async () => {
-      mockGet().mockImplementation((url) =>
-        url === '/api/tickets/assignees' ? new Promise(() => {}) : Promise.resolve({ data: { ticket } }),
-      )
+      mockGet().mockImplementation((url) => {
+        if (url === '/api/tickets/assignees') return new Promise(() => {})
+        if (url === '/api/tickets/42/replies') return Promise.resolve({ data: { replies: [] } })
+        return Promise.resolve({ data: { ticket } })
+      })
       renderAt('/tickets/42')
 
       await screen.findByRole('heading', { name: ticket.subject, level: 1 })
@@ -320,6 +330,7 @@ describe('TicketDetailPage', () => {
     it('shows an alert when the agents fail to load', async () => {
       mockGet().mockImplementation(async (url) => {
         if (url === '/api/tickets/assignees') throw httpError(500)
+        if (url === '/api/tickets/42/replies') return { data: { replies: [] } }
         return { data: { ticket } }
       })
       renderAt('/tickets/42')
@@ -468,6 +479,35 @@ describe('TicketDetailPage', () => {
       expect(categorySelect()).toHaveTextContent('Refund request')
       expect(categorySelect()).not.toHaveTextContent('General question')
       expect(categorySelect()).toBeEnabled()
+    })
+  })
+
+  describe('replies', () => {
+    it('shows a sent reply in the thread without fetching the replies again', async () => {
+      const user = userEvent.setup()
+      const get = mockTicketAndAgents(ticket)
+      const reply = {
+        id: 7,
+        body: 'We have refunded your order.',
+        sender: ReplySender.agent,
+        createdAt: '2026-04-05T08:00:00.000Z',
+        author: { id: 'user-2', name: 'Alan Agent' },
+      }
+      const post = vi.spyOn(axios, 'post').mockResolvedValue({ status: 201, data: { reply } })
+      renderAt('/tickets/42')
+      const thread = await screen.findByRole('region', { name: 'Replies' })
+      await within(thread).findByText('No replies yet.')
+
+      await user.type(screen.getByRole('textbox', { name: 'Reply' }), reply.body)
+      await user.click(screen.getByRole('button', { name: 'Send reply' }))
+
+      expect(post).toHaveBeenCalledExactlyOnceWith('/api/tickets/42/replies', { body: reply.body })
+      const items = await within(thread).findAllByRole('listitem')
+      expect(items).toHaveLength(1)
+      expect(within(items[0]).getByText(reply.body)).toBeInTheDocument()
+      expect(within(items[0]).getByText('Agent')).toBeInTheDocument()
+      expect(within(thread).queryByText('No replies yet.')).not.toBeInTheDocument()
+      expect(get.mock.calls.filter(([url]) => url === '/api/tickets/42/replies')).toHaveLength(1)
     })
   })
 })
