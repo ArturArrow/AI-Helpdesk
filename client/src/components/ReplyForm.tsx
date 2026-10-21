@@ -48,6 +48,13 @@ function ReplyForm({ ticket }: { ticket: Pick<TicketDetailData, 'id'> }) {
           rows={4}
           aria-invalid={!!errors.body}
           {...register('body')}
+          onKeyDown={(e) => {
+            // Cmd+Enter (Ctrl+Enter off macOS) sends, like clicking "Send reply".
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !sendReply.isPending) {
+              e.preventDefault()
+              e.currentTarget.form?.requestSubmit()
+            }
+          }}
         />
         {errors.body && (
           <p role="alert" className="text-sm text-destructive">
