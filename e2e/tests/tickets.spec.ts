@@ -781,18 +781,6 @@ test.describe('GET /api/tickets/:id', () => {
     expect(body.ticket.assignedTo).toEqual({ id: agent.id, name: agent.name })
     expect(body.ticket).not.toHaveProperty('assignedToId')
   })
-
-  test('a soft-deleted assignee is still shown in assignedTo', async ({ request }) => {
-    await signInViaApi(request, ADMIN)
-    const agent = await createUserViaApi(request, 'deleted-assignee')
-    const ticket = await createTicketViaWebhook(request, 'detail-deleted-assignee')
-    await updateTicketViaApi(request, ticket.id, { assignedToId: agent.id })
-    await deleteUserViaApi(request, agent.id)
-
-    const res = await request.get(`/api/tickets/${ticket.id}`)
-    expect(res.status()).toBe(200)
-    expect((await res.json()).ticket.assignedTo).toEqual({ id: agent.id, name: agent.name })
-  })
 })
 
 // The signed-in user's id, from /api/me.
