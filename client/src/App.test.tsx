@@ -28,6 +28,7 @@ const ticket = {
   createdAt: '2026-04-04T09:30:00.000Z',
   updatedAt: '2026-04-04T09:30:00.000Z',
   body: 'It is on fire.',
+  bodyHTML: null,
   assignedTo: null,
 }
 

@@ -22,10 +22,11 @@ const ticketListSelect = {
   createdAt: true,
 } as const;
 
-// The detail adds the body. bodyHTML is left out: the sender's HTML isn't safe to render.
+// The detail adds the bodies. bodyHTML is the sender's raw HTML: the client must sanitize it before rendering.
 const ticketDetailSelect = {
   ...ticketListSelect,
   body: true,
+  bodyHTML: true,
   assignedToId: true,
   updatedAt: true,
 } as const;

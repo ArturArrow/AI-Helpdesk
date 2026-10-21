@@ -1,11 +1,13 @@
+import DOMPurify from 'dompurify'
 import type { TicketDetailData } from 'core/constants/ticket'
 import { Card, CardContent } from '@/components/ui/card.tsx'
 
 type TicketDetailProps = {
-  ticket: Pick<TicketDetailData, 'senderName' | 'senderEmail' | 'createdAt' | 'body' | 'updatedAt'>
+  ticket: Pick<TicketDetailData, 'senderName' | 'senderEmail' | 'createdAt' | 'body' | 'bodyHTML' | 'updatedAt'>
 }
 
-// The sender, timestamps and plain-text body of a ticket.
+// The sender, timestamps and body of a ticket: the HTML body when there is one, otherwise the plain text.
+// The HTML comes from the sender, so it is always sanitized before it is rendered.
 function TicketDetail({ ticket }: TicketDetailProps) {
   return (
     <>
@@ -26,7 +28,14 @@ function TicketDetail({ ticket }: TicketDetailProps) {
         </div>
       </dl>
       <Card>
-        <CardContent className="text-sm wrap-break-word whitespace-pre-wrap">{ticket.body}</CardContent>
+        {ticket.bodyHTML ? (
+          <CardContent
+            className="text-sm wrap-break-word"
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(ticket.bodyHTML) }}
+          />
+        ) : (
+          <CardContent className="text-sm wrap-break-word whitespace-pre-wrap">{ticket.body}</CardContent>
+        )}
       </Card>
     </>
   )

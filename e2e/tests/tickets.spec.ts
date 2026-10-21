@@ -663,7 +663,7 @@ test.describe('GET /api/tickets pagination (page, pageSize)', () => {
 })
 
 const TICKET_ID_ERROR = 'id must be a positive integer'
-const DETAIL_KEYS = ['assignedTo', 'body', 'category', 'createdAt', 'id', 'senderEmail', 'senderName', 'status', 'subject', 'updatedAt']
+const DETAIL_KEYS = ['assignedTo', 'body', 'bodyHTML', 'category', 'createdAt', 'id', 'senderEmail', 'senderName', 'status', 'subject', 'updatedAt']
 
 test.describe('GET /api/tickets/:id', () => {
   test('401 without a session, for an existing and an invalid id', async ({ request }) => {
@@ -704,7 +704,7 @@ test.describe('GET /api/tickets/:id', () => {
     expect(await res.json()).toEqual({ error: 'Ticket not found' })
   })
 
-  test('returns exactly the detail fields, with assignedTo null and no bodyHTML, messageId or assignedToId', async ({ request }) => {
+  test('returns exactly the detail fields, with the stored bodyHTML, assignedTo null and no messageId or assignedToId', async ({ request }) => {
     const suffix = uniqueSuffix()
     const created = await request.post('/api/webhooks/inbound-email', {
       headers: { 'X-Inbound-Secret': inboundSecret() },
@@ -737,13 +737,35 @@ test.describe('GET /api/tickets/:id', () => {
       createdAt: expect.any(String),
       updatedAt: expect.any(String),
       body: 'Plain body',
+      bodyHTML: '<p>HTML body</p>',
       assignedTo: null,
     })
-    expect(body.ticket).not.toHaveProperty('bodyHTML')
     expect(body.ticket).not.toHaveProperty('messageId')
     expect(body.ticket).not.toHaveProperty('assignedToId')
     expect(Number.isNaN(Date.parse(body.ticket.createdAt))).toBe(false)
     expect(Number.isNaN(Date.parse(body.ticket.updatedAt))).toBe(false)
+  })
+
+  test('bodyHTML is the raw HTML as sent to the webhook, not sanitized', async ({ request }) => {
+    // The server stores and returns the sender's HTML as is; sanitizing is the client's job.
+    const html = '<div class="x"><p onclick="alert(1)">Hi <b>there</b></p><script>alert(2)</script></div>'
+    const ticket = await createTicketViaWebhook(request, 'detail-raw-html', { bodyHTML: html })
+
+    await signInViaApi(request, AGENT)
+    const res = await request.get(`/api/tickets/${ticket.id}`)
+    expect(res.status()).toBe(200)
+    expect((await res.json()).ticket.bodyHTML).toBe(html)
+  })
+
+  test('a ticket created without bodyHTML has bodyHTML null', async ({ request }) => {
+    const ticket = await createTicketViaWebhook(request, 'detail-no-html')
+
+    await signInViaApi(request, AGENT)
+    const res = await request.get(`/api/tickets/${ticket.id}`)
+    expect(res.status()).toBe(200)
+    const body = await res.json()
+    expect(Object.keys(body.ticket).sort()).toEqual(DETAIL_KEYS)
+    expect(body.ticket.bodyHTML).toBeNull()
   })
 
   test('an assigned ticket has assignedTo { id, name } of the agent', async ({ request }) => {
@@ -882,7 +904,8 @@ test.describe('PATCH /api/tickets/:id', () => {
         assignedTo: { id: agent.id, name: agent.name },
         updatedAt: expect.any(String),
       })
-      expect(body.ticket).not.toHaveProperty('bodyHTML')
+      // createTicketViaWebhook sends no bodyHTML, so the PATCH response carries it as null.
+      expect(body.ticket.bodyHTML).toBeNull()
       expect(body.ticket).not.toHaveProperty('assignedToId')
       expect(Date.parse(body.ticket.updatedAt)).toBeGreaterThan(Date.parse(before.updatedAt))
 
@@ -918,6 +941,16 @@ test.describe('PATCH /api/tickets/:id', () => {
 
     const reassigned = await updateTicketViaApi(request, ticket.id, { assignedToId: second.id })
     expect(reassigned.assignedTo).toEqual({ id: second.id, name: second.name })
+  })
+
+  test('the PATCH response carries the stored bodyHTML, unchanged', async ({ request }) => {
+    const html = '<p>Stored <i>HTML</i></p>'
+    const ticket = await createTicketViaWebhook(request, 'patch-html', { bodyHTML: html })
+    await signInViaApi(request, AGENT)
+
+    const updated = await updateTicketViaApi(request, ticket.id, { status: 'resolved' })
+    expect(Object.keys(updated).sort()).toEqual(DETAIL_KEYS)
+    expect(updated.bodyHTML).toBe(html)
   })
 
   test('a valid but nonexistent id (2147483647) gets 404', async ({ request }) => {

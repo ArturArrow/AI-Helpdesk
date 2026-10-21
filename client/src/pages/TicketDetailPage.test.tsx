@@ -21,6 +21,7 @@ const ticket = {
   createdAt: '2026-04-04T09:30:00.000Z',
   updatedAt: '2026-04-05T14:15:00.000Z',
   body: 'Hello,\nplease refund my order.',
+  bodyHTML: null,
   assignedTo: { id: 'user-2', name: 'Alan Agent' } as { id: string; name: string } | null,
 }
 
