@@ -137,6 +137,9 @@ model Reply {
   bodyHTML  String?
   // agent: written in the UI. customer: an email in the ticket's thread (Phase 6).
   sender    ReplySender
+  // The Message-ID of a customer's email: dedupes redelivered webhooks and threads later
+  // replies to it. Null for agent replies.
+  messageId String?     @unique
   authorId  String?
   author    User?       @relation(fields: [authorId], references: [id])
   createdAt DateTime    @default(now())

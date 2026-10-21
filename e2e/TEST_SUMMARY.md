@@ -3,8 +3,8 @@
 ## Last run
 
 - **Date:** 2026-10-21
-- **Discovered (`--list`):** 234 tests in 8 files (api-auth 16, login 6, replies 33, routing 5, session 7, tickets 128, users 22, webhook 17)
-- **Result:** 234 passed, 0 failed, 43.0s (chromium), after adding `bodyHTML` to `Reply`.
+- **Discovered (`--list`):** 242 tests in 8 files (api-auth 16, login 6, replies 33, routing 5, session 7, tickets 128, users 22, webhook 25)
+- **Result:** 242 passed, 0 failed, 48.8s (chromium), after adding reply threading to the inbound-email webhook.
 
 ## tests/login.spec.ts
 
@@ -73,7 +73,7 @@
 
 ## tests/webhook.spec.ts
 
-POST `/api/webhooks/inbound-email`. The route returns only `{"ticket":{"id":<number>}}`, so these tests check the response, not the stored row.
+POST `/api/webhooks/inbound-email`. The route returns `{"ticket":{"id":<number>}}`, plus `"reply":{"id":<number>}` for an email that threads onto a ticket. Ticket-creating tests check the response only; the threading tests read the stored replies and status back through GET `/api/tickets/:id/replies` and `/api/tickets/:id` (signed in as the admin).
 
 - No `X-Inbound-Secret` header gets 401 `{"error":"Unauthorized"}`.
 - A wrong secret gets 401 `{"error":"Unauthorized"}`.
@@ -86,7 +86,14 @@ POST `/api/webhooks/inbound-email`. The route returns only `{"ticket":{"id":<num
 - The same `messageId` posted twice gets 201, then 200 with the same id.
 - Two concurrent posts with the same new `messageId` get one 201 and one 200, with the same id.
 - Two identical posts without a `messageId` get 201 each, with distinct ids.
-- 400 with the schema message for: missing senderEmail, invalid senderEmail, missing senderName, missing body (one test each).
+- Threading: `inReplyTo` set to a ticket's `messageId` gets 201 `{ ticket: { id: <that ticket> }, reply: { id } }`; no ticket matches the reply's unique token in the list search, and the ticket's replies are exactly one `customer` reply with the sent `body` and `bodyHTML` and `author` null.
+- Threading: a ticket's `messageId` only in `references` (after an unknown id, no `inReplyTo`) threads the reply onto that ticket, with no new ticket.
+- Threading: `inReplyTo` set to an earlier customer reply's `messageId` threads onto the same ticket; the thread holds both replies in order and no new ticket exists.
+- Threading: the same reply posted twice gets 201, then 200 with the same ticket and reply ids, and the ticket has one reply.
+- Threading: a ticket PATCHed to `resolved` is `open` again after a customer reply.
+- Threading: an open ticket stays `open` after a customer reply.
+- Threading: an unknown `inReplyTo` gets 201 `{ ticket }` with a new id, and neither ticket has replies.
+- 400 with the schema message for: missing senderEmail, invalid senderEmail, missing senderName, missing body, `references` not an array (one test each).
 - Malformed JSON gets a JSON 400 with no HTML and no stack frames.
 - A body over 100 kB gets 413 with a JSON `{"error":...}`.
 
@@ -242,7 +249,7 @@ GET:
   - `createUserViaApi(request, label)` creates an agent through POST `/api/users` (the request must be signed in as the admin), asserts 201 and returns its credentials and `id`. Tests that mutate or delete users create their own, so the seeded admin and agent never change.
   - `deleteUserViaApi(request, id)` soft-deletes a user through DELETE `/api/users/:id` (signed in as the admin) and asserts 204.
   - `users.spec.ts` keeps its own `userRow`, `openNewUserDialog`, `submitNewUser`, `openEditDialog`, `openDeleteDialog` and `postSignIn`, which only it uses.
-- **`fixtures/webhook.ts`:** `inboundSecret()` reads `INBOUND_EMAIL_SECRET` from `server/.env.test` (the file `start:test` loads) with `node:util`'s `parseEnv`, so the tests and the server share one value. It reads lazily and throws a clear error if the value is missing, so other specs still load. `webhook.spec.ts` keeps its own `validEmail` (unique sender per call), `uniqueMessageId`, `postInbound`, `expectUnauthorized` and `expectCreated`.
+- **`fixtures/webhook.ts`:** `inboundSecret()` reads `INBOUND_EMAIL_SECRET` from `server/.env.test` (the file `start:test` loads) with `node:util`'s `parseEnv`, so the tests and the server share one value. It reads lazily and throws a clear error if the value is missing, so other specs still load. `webhook.spec.ts` keeps its own `validEmail` (unique sender per call), `uniqueMessageId`, `postInbound`, `expectUnauthorized` and `expectCreated`, and for threading `createThreadTicket` (a ticket with a known `messageId`), `replyEmail` (an answer with a unique token in subject and sender, `bodyHTML` and its own `messageId`), `expectReplyCreated`, `listReplies`, `ticketStatus` and `expectNoTicketWith` (the list search for the token totals 0).
 - **`fixtures/tickets.ts`:** `createTicketViaWebhook(request, label, overrides?)` posts a unique email (subject `E2E <label> <suffix>`, unique sender, body `Please help.`) to the inbound webhook with the secret, asserts 201 and returns the ticket's `id`, `subject`, `senderName` and `senderEmail`. `overrides` sets `subject`, `senderName`, `senderEmail`, `body` or `bodyHTML` exactly, for the sorting, search and `bodyHTML` tests; without a `bodyHTML` override none is sent, so the ticket's `bodyHTML` is null. The defaults contain no `%`, `_` or `\`. It needs no session. `updateTicketViaApi(request, ticketId, data)` sends any of `assignedToId`, `status`, `category` (type `TicketUpdate`; `null` unassigns or unclassifies) through PATCH `/api/tickets/:id`, asserts 200 and returns the ticket; the request must be signed in. `tickets.spec.ts` keeps its own `getTicket(request, id)` (GET `/api/tickets/:id`, asserts 200, returns the ticket), `expectUpdated(request, before, data, changes)` (PATCH, then the response equals `before` plus `changes` with a later `updatedAt`, and a GET matches), `currentUserId(request)` (the signed-in user's id from `/api/me`), `listAssignees(request)` (GET `/api/tickets/assignees`, asserts 200 and exactly `{ agents }`), `getTicketPage(request, params)` (GET with sort, filter, search and paging params, asserts 200, returns `{ tickets, total }`), `listTickets(request, params)` (the same, returning only `tickets`), `expectInOrder(tickets, ids)` (the ids are listed in that relative order), `searchOverride(field, token)` (puts a token into one field) `expectAllContain(tickets, text)` (every row holds the text in subject, sender name or email), `expectRowsMatch(tickets, filters)` and `expectFilter(request, filters, id, subject, listed)` (the filter keeps or drops the ticket, and every row of a page of 100 matches), and `createTicketsWithToken(request, token, labels)` (one ticket per label, subject `<token> <label>`).
 - `replies.spec.ts` keeps its own `currentUserId(request)`, `listReplies(request, ticketId)` (GET, asserts 200 and exactly `{ replies }`) and `postReply(request, ticketId, body)` (POST, asserts 201 and exactly `{ reply }`), which only it uses.
 - Helpers are plain exported functions: no page objects and no `test.extend` fixtures.
@@ -276,7 +283,8 @@ GET:
 - **The assignment UI on the detail page:** covered by component tests, not E2E.
 - **Concurrent assignment:** two PATCHes racing on one ticket (last write wins) can't be observed from a serial test.
 - **The replies UI on the detail page** (`ReplyThread`, `ReplyForm`): covered by component tests, not E2E.
-- **Customer replies and the `id asc` tie-break:** only `POST` writes replies and it always stores `sender: agent` with `bodyHTML: null`, so a `customer` reply with `author: null` or a non-null `bodyHTML` can't be created through the API, and two replies with the same `createdAt` can't be forced from a serial test.
+- **The replies `id asc` tie-break:** two replies with the same `createdAt` can't be forced from a serial test. Customer replies (`author: null`, non-null `bodyHTML`) are now created through the webhook and checked in `webhook.spec.ts`.
+- **Threading edge cases not requested:** a ticket set to `closed` (only `resolved` is tested; the route reopens any non-open status), `references` over 100 entries, a threaded reply without a `messageId` (stored, but can't be deduped), concurrent redelivery of a reply (the P2002 path), and a reply whose `inReplyTo` and `references` point at different tickets (the route takes the first `findFirst` match) aren't tested.
 - **Cascade delete of replies with their ticket:** there is no endpoint that deletes tickets.
 - **A body padded with whitespace past 10,000 characters:** whether the length limit applies to the trimmed text isn't tested.
 - **Not built yet:** sending replies to the customer (no email provider), restoring a deleted user, ticket creation through the API and updates to content (subject, body; PATCH ignores unknown fields), AI features, email, and the dashboard.
@@ -297,6 +305,7 @@ GET:
 - **Unknown PATCH fields are dropped silently:** zod strips them, so `{ subject: "x" }` alone gets the empty-body 400 (`tickets.spec.ts` records this), while `{ status, subject }` would get 200 with the subject ignored (not tested). A `.strict()` schema would reject them instead, if wanted.
 - **Search is a sequential `ILIKE` scan:** the route comment says so; fine at this size, a trigram index or full-text search if the table grows. Not something a test checks.
 - **A soft-deleted agent stays shown as a reply's author:** GET `/api/tickets/:id/replies` doesn't filter `deletedAt` on `author`, the same display-only rule as `assignedTo`. `replies.spec.ts` records this.
-- **A reply's `bodyHTML` will be raw sender HTML:** the route comment says it is unsanitized, like the ticket's. No endpoint stores a non-null value yet, so the tests only check `null`; `ReplyThread` already renders it only through `DOMPurify.sanitize`, covered in `ReplyThread.test.tsx`.
+- **A reply's `bodyHTML` is raw sender HTML:** customer replies from the webhook store it unsanitized, like the ticket's, and GET replies returns it as sent (`webhook.spec.ts` records this). `ReplyThread` renders it only through `DOMPurify.sanitize`, covered in `ReplyThread.test.tsx`.
+- **Threading doesn't check the sender:** any email naming a known Message-ID becomes a customer reply on that ticket, whoever sent it (the route comment allows for CC'd senders), and the reply stores no sender address. Not asserted either way.
 - **Replies are stored only:** POST answers 201 but nothing is sent to the customer yet (no email provider). The tests record storage only.
 - **App changes needed:** none to run the current suite. Every locator uses an accessible label, role or text.
