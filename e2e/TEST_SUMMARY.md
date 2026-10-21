@@ -3,8 +3,8 @@
 ## Last run
 
 - **Date:** 2026-10-21
-- **Discovered (`--list`):** 259 tests in 8 files.
-- **Result:** 259 passed, 0 failed, 44.5s (chromium), after merging the reply threading and webhook length-limit branches, merging the webhook no-ticket helpers and adding the `inReplyTo` / `references` length-limit tests.
+- **Discovered (`--list`):** 260 tests in 8 files.
+- **Result:** 260 passed, 0 failed, 1.0m (chromium), after making `DELETE /api/users/:id` unassign the deleted agent's tickets, adding its tests to `users.spec.ts` and removing the soft-deleted-assignee detail test from `tickets.spec.ts`.
 
 ## tests/login.spec.ts
 
@@ -68,6 +68,8 @@
 - Admin DELETE on an unknown id gets 404 `{"error":"User not found"}`.
 - Deleting the same user twice gets 404 `{"error":"User not found"}` the second time.
 - DELETE as the agent gets 403 and unauthenticated gets 401. The user is still listed and still signs in.
+- Deleting an agent unassigns all their tickets: an open one and one set to `resolved` (both assigned through PATCH) return `assignedTo: null` from GET `/api/tickets/:id` after the 204, the resolved one keeps status `resolved`, and a ticket assigned to another agent keeps that agent.
+- Deleting an agent who holds no tickets gets 204 with an empty body, and the user is gone from GET `/api/users`.
 - PATCH on a deleted user gets 404 `{"error":"User not found"}`.
 - POST `/api/users` with a deleted user's email gets 409 "A user with this email already exists", and the email doesn't reappear in the list.
 
@@ -186,7 +188,6 @@ Detail (GET `/api/tickets/:id`):
 - `bodyHTML` with attributes, an `onclick` handler and a `<script>` comes back byte-for-byte as sent (the server doesn't sanitize).
 - A ticket created without `bodyHTML` has the detail keys with `bodyHTML: null`.
 - A ticket assigned (through PATCH) to an admin-created agent returns `assignedTo: { id, name }` of that agent, read by the seeded agent, with no `assignedToId`.
-- After that assignee is soft-deleted, `assignedTo` still shows their `{ id, name }`.
 
 Assignees (GET `/api/tickets/assignees`). Other specs create and delete agents, so these check membership and relative order, never the full list.
 
@@ -314,8 +315,8 @@ GET:
 - **A deleted user's email stays reserved:** POST and PATCH still see soft-deleted users, so the email can't be reused (409), and nothing in the UI shows why. `users.spec.ts` records this.
 - **The detail returns the sender's raw HTML:** GET and PATCH `/api/tickets/:id` now include `bodyHTML` unsanitized (a `<script>` and `onclick` come back as sent), so the client must sanitize before rendering. `tickets.spec.ts` records this; sanitizing on the client is a component-test concern. `messageId` is still not exposed, so it stays unchecked as stored.
 - **Resolved: assignment goes through the API.** The DB-writing `e2e/assign-ticket.ts` and `assignTicketInDb` were removed; the `assignedTo` detail tests now assign with PATCH `/api/tickets/:id`.
-- **A soft-deleted agent's tickets keep them as assignee:** deleting a user doesn't unassign their tickets, and PATCH only refuses new assignments to them. Not tested beyond the detail still showing them.
-- **A soft-deleted assignee still shows on the ticket:** GET `/api/tickets/:id` doesn't filter `deletedAt` for `assignedTo` (by design, per the route comment). `tickets.spec.ts` records this.
+- **Resolved: deleting an agent unassigns their tickets** (DELETE `/api/users/:id`, same transaction as `deletedAt`); `users.spec.ts` covers it. The detail test that showed a deleted assignee was removed, since that state can no longer be produced through the API.
+- **A deleted assignee would still show on a ticket assigned before that rule:** GET `/api/tickets/:id` still skips the `deletedAt` filter for `assignedTo` (per the route comment), for rows left over from before the unassign. Not tested: reaching that state needs a direct DB write.
 - **An `assignedToId` pointing at no user returns `assignedTo: null`:** the column has no foreign key, so a dangling id is indistinguishable from unassigned. Not tested.
 - **Resolved: the ticket list is paginated** (`page`, `pageSize`, `{ tickets, total }`), and `tickets.spec.ts` now narrows each list with `q` or `pageSize=100`.
 - **"Every row matches" checks cover one page:** filter and sort checks over all rows look at the first 100 tickets only, since `pageSize` is capped at 100. Enough for the test DB today; walking every page would be needed if it grows past that.

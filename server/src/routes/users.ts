@@ -97,9 +97,13 @@ usersRouter.delete("/:id", async (req, res) => {
     return;
   }
 
-  // Soft delete: keep the row, end the sessions. The session.create hook in auth.ts stops
+  // Soft delete: keep the row, end the sessions, and unassign the user's tickets so none
+  // are left held by someone who can't sign in. The session.create hook in auth.ts stops
   // the user from signing in again.
-  await prisma.user.update({ where: { id }, data: { deletedAt: new Date() } });
+  await prisma.$transaction([
+    prisma.user.update({ where: { id }, data: { deletedAt: new Date() } }),
+    prisma.ticket.updateMany({ where: { assignedToId: id }, data: { assignedToId: null } }),
+  ]);
   await ctx.internalAdapter.deleteUserSessions(id);
   res.status(204).end();
 });

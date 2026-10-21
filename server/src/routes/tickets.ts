@@ -96,8 +96,9 @@ ticketsRouter.get("/assignees", async (_req, res) => {
   res.json({ agents });
 });
 
-// assignedToId has no relation, so look the agent up separately. Display only: a
-// soft-deleted agent's name still shows on the tickets they had.
+// assignedToId has no relation, so look the agent up separately. Deleting an agent
+// unassigns their tickets, but the lookup skips the deletedAt filter so a ticket assigned
+// before that rule existed still shows the deleted agent's name.
 type TicketDetailRow = Prisma.TicketGetPayload<{ select: typeof ticketDetailSelect }>;
 
 async function withAssignee({ assignedToId, ...ticket }: TicketDetailRow) {

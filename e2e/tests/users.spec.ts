@@ -1,5 +1,6 @@
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 import { ADMIN, AGENT, ORIGIN, signInViaApi, submitLoginForm } from '../fixtures/auth.js'
+import { createTicketViaWebhook, updateTicketViaApi } from '../fixtures/tickets.js'
 import { createUserViaApi, deleteUserViaApi, uniqueSuffix } from '../fixtures/users.js'
 
 // The table row whose Email cell is exactly `email`.
@@ -45,6 +46,13 @@ async function openDeleteDialog(page: Page, name: string) {
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('heading', { name: 'Delete user' })).toBeVisible()
   return dialog
+}
+
+// GET /api/tickets/:id as `request`'s session; asserts 200 and returns the ticket.
+async function getTicket(request: APIRequestContext, id: number) {
+  const res = await request.get(`/api/tickets/${id}`)
+  expect(res.status(), `get ticket ${id}`).toBe(200)
+  return (await res.json()).ticket
 }
 
 // Signs in through the API with `user`'s credentials and returns the response, without asserting.
@@ -497,6 +505,46 @@ test.describe('DELETE /api/users/:id', () => {
     })
     expect(res.status()).toBe(404)
     expect(await res.json()).toEqual({ error: 'User not found' })
+  })
+
+  test("unassigns every ticket of the deleted agent, whatever its status; other agents' tickets stay", async ({
+    request,
+  }) => {
+    await signInViaApi(request, ADMIN)
+    const leaving = await createUserViaApi(request, 'delassignee')
+    const staying = await createUserViaApi(request, 'delother')
+    const open = await createTicketViaWebhook(request, 'del-unassign-open')
+    const resolved = await createTicketViaWebhook(request, 'del-unassign-resolved')
+    const others = await createTicketViaWebhook(request, 'del-unassign-other')
+    await updateTicketViaApi(request, open.id, { assignedToId: leaving.id })
+    await updateTicketViaApi(request, resolved.id, { assignedToId: leaving.id, status: 'resolved' })
+    await updateTicketViaApi(request, others.id, { assignedToId: staying.id })
+    expect(await getTicket(request, resolved.id)).toMatchObject({
+      status: 'resolved',
+      assignedTo: { id: leaving.id, name: leaving.name },
+    })
+
+    const res = await request.delete(`/api/users/${leaving.id}`)
+    expect(res.status()).toBe(204)
+    expect(await res.text()).toBe('')
+
+    expect(await getTicket(request, open.id)).toMatchObject({ status: 'open', assignedTo: null })
+    expect(await getTicket(request, resolved.id)).toMatchObject({ status: 'resolved', assignedTo: null })
+    expect(await getTicket(request, others.id)).toMatchObject({
+      status: 'open',
+      assignedTo: { id: staying.id, name: staying.name },
+    })
+  })
+
+  test('deleting an agent who holds no tickets still gets 204', async ({ request }) => {
+    await signInViaApi(request, ADMIN)
+    const user = await createUserViaApi(request, 'delnotickets')
+
+    const res = await request.delete(`/api/users/${user.id}`)
+    expect(res.status()).toBe(204)
+    expect(await res.text()).toBe('')
+    const { users } = await (await request.get('/api/users')).json()
+    expect(users.map((u: { id: string }) => u.id)).not.toContain(user.id)
   })
 
   test("POST with a deleted user's email gets 409; the email stays reserved", async ({ request }) => {
