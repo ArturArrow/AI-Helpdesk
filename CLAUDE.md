@@ -148,7 +148,7 @@ It works because the import is types-only. `verbatimModuleSyntax` erases it, so 
 - **Auth is a shared secret, not a session:** `requireWebhookSecret` (`server/src/middleware/requireWebhookSecret.ts`) compares the `X-Inbound-Secret` header to `INBOUND_EMAIL_SECRET` with `timingSafeEqual` and replies `401 {"error":"Unauthorized"}` otherwise. It is mounted on the whole prefix (`app.use("/api/webhooks", requireWebhookSecret, webhookRouter)`), so add future webhooks to `webhookRouter`. Never put `requireAuth` on it.
 - **Dedupe by `messageId`:** providers redeliver on timeouts, so a known `messageId` returns the existing ticket with `200` instead of `201`; a concurrent duplicate that hits the unique constraint (P2002) is answered the same way. The column is also meant for threading replies later.
 - New tickets are `TicketStatus.open`, `category: null` (to be set by classification) and `assignedToId: null`. `assignedToId` holds a `User.id` but is deliberately a plain column with no Prisma relation. Use the generated `TicketStatus` / `TicketCategory` enums on the server and `core/constants/ticketStatus` / `ticketCategory` elsewhere, never string literals, as with `Role`.
-- Bodies over `express.json()`'s 100 kB default get a 413. Raise the limit for this route if real emails hit it.
+- `/api/webhooks` has its own `express.json({ limit: "1mb" })`, in the same mount as the secret and **after** `requireWebhookSecret` (so an unauthenticated caller can't make the server read 1 MB), and mounted before the global 100 kB parser, which then skips those requests; larger requests get a 413. The schema caps `body` at 50 000 and `bodyHTML` at 100 000 characters (400), and the header fields at their RFC limits (`senderEmail` 254, the rest 998).
 
 ## Architecture
 

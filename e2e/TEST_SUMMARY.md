@@ -3,8 +3,8 @@
 ## Last run
 
 - **Date:** 2026-10-21
-- **Discovered (`--list`):** 232 tests in 8 files (api-auth 16, login 6, replies 31, routing 5, session 7, tickets 128, users 22, webhook 17)
-- **Result:** 232 passed, 0 failed, 44.5s (chromium).
+- **Discovered (`--list`):** 243 tests in 8 files (api-auth 16, login 6, replies 31, routing 5, session 7, tickets 128, users 22, webhook 28)
+- **Result:** 243 passed, 0 failed, 51.2s (chromium), after the webhook length limits, the 1 MB webhook parser and moving it behind the secret check.
 
 ## tests/login.spec.ts
 
@@ -73,7 +73,7 @@
 
 ## tests/webhook.spec.ts
 
-POST `/api/webhooks/inbound-email`. The route returns only `{"ticket":{"id":<number>}}`, so these tests check the response, not the stored row.
+POST `/api/webhooks/inbound-email`. The route returns only `{"ticket":{"id":<number>}}`, so most tests check the response; the length-limit tests also read the stored row through GET `/api/tickets` and `/api/tickets/:id`.
 
 - No `X-Inbound-Secret` header gets 401 `{"error":"Unauthorized"}`.
 - A wrong secret gets 401 `{"error":"Unauthorized"}`.
@@ -88,7 +88,18 @@ POST `/api/webhooks/inbound-email`. The route returns only `{"ticket":{"id":<num
 - Two identical posts without a `messageId` get 201 each, with distinct ids.
 - 400 with the schema message for: missing senderEmail, invalid senderEmail, missing senderName, missing body (one test each).
 - Malformed JSON gets a JSON 400 with no HTML and no stack frames.
-- A body over 100 kB gets 413 with a JSON `{"error":...}`.
+- A 255-character (valid-shaped) `senderEmail` gets 400 `{"error":"senderEmail is too long"}`, and no ticket with the test's subject is listed.
+- A 254-character valid `senderEmail` (64-char local part, domain labels of 63/63/57 + `.com`) gets 201 and the detail returns it in full.
+- A 999-character `senderName` gets 400 `{"error":"senderName is too long"}`, and no ticket is listed.
+- A 998-character `senderName` gets 201 and the detail returns it in full.
+- A 999-character `messageId` gets 400 `{"error":"messageId is too long"}`, and no ticket is listed.
+- A 998-character `messageId` gets 201, and reposting it gets 200 with the same id (shows it was stored, since no response exposes `messageId`).
+- A 50,001-character `body` gets 400 `{"error":"body is too long"}`, and no ticket is listed.
+- A 50,000-character `body` gets 201 and the detail returns it in full.
+- A 100,001-character `bodyHTML` gets 400 `{"error":"bodyHTML is too long"}`, and no ticket is listed.
+- A 100,000-character `bodyHTML` gets 201.
+- A request over 100 kB (50,000-char `body` + 100,000-char `bodyHTML`) gets 201, so the webhook's own 1 MB `express.json` limit applies instead of the global 100 kB one.
+- A request over 1 MB gets 413 with a JSON `{"error":...}`.
 
 ## tests/tickets.spec.ts
 
@@ -240,7 +251,7 @@ GET:
   - `createUserViaApi(request, label)` creates an agent through POST `/api/users` (the request must be signed in as the admin), asserts 201 and returns its credentials and `id`. Tests that mutate or delete users create their own, so the seeded admin and agent never change.
   - `deleteUserViaApi(request, id)` soft-deletes a user through DELETE `/api/users/:id` (signed in as the admin) and asserts 204.
   - `users.spec.ts` keeps its own `userRow`, `openNewUserDialog`, `submitNewUser`, `openEditDialog`, `openDeleteDialog` and `postSignIn`, which only it uses.
-- **`fixtures/webhook.ts`:** `inboundSecret()` reads `INBOUND_EMAIL_SECRET` from `server/.env.test` (the file `start:test` loads) with `node:util`'s `parseEnv`, so the tests and the server share one value. It reads lazily and throws a clear error if the value is missing, so other specs still load. `webhook.spec.ts` keeps its own `validEmail` (unique sender per call), `uniqueMessageId`, `postInbound`, `expectUnauthorized` and `expectCreated`.
+- **`fixtures/webhook.ts`:** `inboundSecret()` reads `INBOUND_EMAIL_SECRET` from `server/.env.test` (the file `start:test` loads) with `node:util`'s `parseEnv`, so the tests and the server share one value. It reads lazily and throws a clear error if the value is missing, so other specs still load. `webhook.spec.ts` keeps its own `validEmail` (unique sender per call), `uniqueMessageId`, `postInbound`, `expectUnauthorized`, `expectCreated`, `emailOfLength(n)` (a valid, unique address of exactly n characters), `expectNoTicketMatching(request, marker)` (signs in as the admin, GET `/api/tickets?q=` returns `{ tickets: [], total: 0 }`) and `expectTooLong(res, error)`.
 - **`fixtures/tickets.ts`:** `createTicketViaWebhook(request, label, overrides?)` posts a unique email (subject `E2E <label> <suffix>`, unique sender, body `Please help.`) to the inbound webhook with the secret, asserts 201 and returns the ticket's `id`, `subject`, `senderName` and `senderEmail`. `overrides` sets `subject`, `senderName`, `senderEmail`, `body` or `bodyHTML` exactly, for the sorting, search and `bodyHTML` tests; without a `bodyHTML` override none is sent, so the ticket's `bodyHTML` is null. The defaults contain no `%`, `_` or `\`. It needs no session. `updateTicketViaApi(request, ticketId, data)` sends any of `assignedToId`, `status`, `category` (type `TicketUpdate`; `null` unassigns or unclassifies) through PATCH `/api/tickets/:id`, asserts 200 and returns the ticket; the request must be signed in. `tickets.spec.ts` keeps its own `getTicket(request, id)` (GET `/api/tickets/:id`, asserts 200, returns the ticket), `expectUpdated(request, before, data, changes)` (PATCH, then the response equals `before` plus `changes` with a later `updatedAt`, and a GET matches), `currentUserId(request)` (the signed-in user's id from `/api/me`), `listAssignees(request)` (GET `/api/tickets/assignees`, asserts 200 and exactly `{ agents }`), `getTicketPage(request, params)` (GET with sort, filter, search and paging params, asserts 200, returns `{ tickets, total }`), `listTickets(request, params)` (the same, returning only `tickets`), `expectInOrder(tickets, ids)` (the ids are listed in that relative order), `searchOverride(field, token)` (puts a token into one field) `expectAllContain(tickets, text)` (every row holds the text in subject, sender name or email), `expectRowsMatch(tickets, filters)` and `expectFilter(request, filters, id, subject, listed)` (the filter keeps or drops the ticket, and every row of a page of 100 matches), and `createTicketsWithToken(request, token, labels)` (one ticket per label, subject `<token> <label>`).
 - `replies.spec.ts` keeps its own `currentUserId(request)`, `listReplies(request, ticketId)` (GET, asserts 200 and exactly `{ replies }`) and `postReply(request, ticketId, body)` (POST, asserts 201 and exactly `{ reply }`), which only it uses.
 - Helpers are plain exported functions: no page objects and no `test.extend` fixtures.
@@ -262,7 +273,9 @@ GET:
 - **Editing a user's role:** PATCH accepts only name, email and password, so there is nothing to test.
 - **Deleting an admin through the UI:** admin rows have no delete button, so it's covered only at the API (403).
 - **The "Deleting…" pending state:** not tested; it would need holding the DELETE request.
-- **Stored webhook tickets, beyond the returned fields:** GET `/api/tickets/:id` returns `body` and `bodyHTML` (checked in `tickets.spec.ts`), but never `messageId`, so that can't be checked as stored. `webhook.spec.ts` still checks only responses: that a missing or blank subject is listed as `"(no subject)"`, that a dedupe adds no second row, and that a 400 creates nothing could now be checked through the list but haven't been added.
+- **Stored webhook tickets, beyond the returned fields:** GET `/api/tickets/:id` returns `body` and `bodyHTML` (checked in `tickets.spec.ts`), but never `messageId`, so that can't be checked as stored. That a missing or blank subject is listed as `"(no subject)"` and that a dedupe adds no second row aren't checked; that a 400 stores nothing is checked only for the length-limit cases.
+- **Subject length limit (998):** the schema has it, but no webhook test covers the 999 → 400 `"subject is too long"` / 998 → 201 boundary.
+- **Length limits measured after trim:** a value padded with whitespace past the limit isn't tested (nor that `bodyHTML`, which isn't trimmed, counts its whitespace).
 - **The `/tickets` page UI:** the table's headers, rows and order, the category label, the empty, loading and error states, and the Tickets navbar link are covered by the Vitest component tests (`client/src/pages/TicketsPage.test.tsx`, `client/src/components/Navbar.test.tsx`), not E2E. The client redirect of an unauthenticated `/tickets` visit and the navbar link navigating there are covered in `client/src/App.test.tsx`; the server side is covered by the GET `/api/tickets` 401. E2E keeps the API tests, which need the real server and database.
 - **Sort order of status and category values:** the sorting tests predate PATCH status/category and still check only the 200 and the newest-first tie-break. The enum declaration order (open < resolved < closed; general_question < technical_question < refund_request) and nulls-last for category could now be tested by setting values through PATCH; not added since it wasn't requested.
 - **Filtering on every status and category:** one test shows a ticket PATCHed to `resolved` / `refund_request` is listed under those filters. `closed`, `general_question` and `technical_question` are still only shown to exclude open, unclassified tickets.
@@ -296,4 +309,5 @@ GET:
 - **Search is a sequential `ILIKE` scan:** the route comment says so; fine at this size, a trigram index or full-text search if the table grows. Not something a test checks.
 - **A soft-deleted agent stays shown as a reply's author:** GET `/api/tickets/:id/replies` doesn't filter `deletedAt` on `author`, the same display-only rule as `assignedTo`. `replies.spec.ts` records this.
 - **Replies are stored only:** POST answers 201 but nothing is sent to the customer yet (no email provider). The tests record storage only.
+- **Resolved: the 1 MB webhook parser runs after the secret check.** `index.ts` mounts `requireWebhookSecret, express.json({ limit: "1mb" }), webhookRouter` together, so an unauthenticated caller gets 401 before any body is read. Not tested that the body is unread.
 - **App changes needed:** none to run the current suite. Every locator uses an accessible label, role or text.

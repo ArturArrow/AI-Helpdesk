@@ -4,23 +4,33 @@ import { TicketStatus } from "../constants/ticketStatus";
 
 // Body of POST /api/webhooks/inbound-email. Provider-neutral: a SendGrid/Mailgun adapter
 // (or a forwarding script) maps its own format onto this.
+// 998 is the RFC 5322 line-length limit for a header; 254 the RFC 5321 limit for an address.
+// The body caps stop abuse; the webhook's own 1 MB JSON limit leaves room for both.
 export const inboundEmailSchema = z.object({
   senderEmail: z
     .string({ error: "senderEmail is required" })
     .trim()
     .toLowerCase()
+    .max(254, "senderEmail is too long")
     .pipe(z.email("senderEmail must be a valid email address")),
-  senderName: z.string({ error: "senderName is required" }).trim().min(1, "senderName is required"),
-  // 998 is the RFC 5322 line-length limit for a header.
+  senderName: z
+    .string({ error: "senderName is required" })
+    .trim()
+    .min(1, "senderName is required")
+    .max(998, "senderName is too long"),
   subject: z
     .string()
     .trim()
     .max(998, "subject is too long")
     .optional()
     .transform((subject) => subject || "(no subject)"),
-  body: z.string({ error: "body is required" }).trim().min(1, "body is required"),
-  bodyHTML: z.string().optional(),
-  messageId: z.string().trim().min(1).optional(),
+  body: z
+    .string({ error: "body is required" })
+    .trim()
+    .min(1, "body is required")
+    .max(50_000, "body is too long"),
+  bodyHTML: z.string().max(100_000, "bodyHTML is too long").optional(),
+  messageId: z.string().trim().min(1).max(998, "messageId is too long").optional(),
 });
 
 export type InboundEmailInput = z.input<typeof inboundEmailSchema>;
