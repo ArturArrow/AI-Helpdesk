@@ -3,8 +3,8 @@
 ## Last run
 
 - **Date:** 2026-10-21
-- **Discovered (`--list`):** pending re-count after merging the reply threading and webhook length-limit branches.
-- **Result:** not run since merging both branches.
+- **Discovered (`--list`):** 259 tests in 8 files.
+- **Result:** 259 passed, 0 failed, 44.5s (chromium), after merging the reply threading and webhook length-limit branches, merging the webhook no-ticket helpers and adding the `inReplyTo` / `references` length-limit tests.
 
 ## tests/login.spec.ts
 
@@ -105,6 +105,12 @@ POST `/api/webhooks/inbound-email`. The route returns `{"ticket":{"id":<number>}
 - A 50,000-character `body` gets 201 and the detail returns it in full.
 - A 100,001-character `bodyHTML` gets 400 `{"error":"bodyHTML is too long"}`, and no ticket is listed.
 - A 100,000-character `bodyHTML` gets 201.
+- A 999-character `inReplyTo` gets 400 `{"error":"inReplyTo is too long"}`, and no ticket is listed.
+- A 998-character `inReplyTo` (an unknown id) gets 201 `{ ticket }`, a new ticket.
+- A `references` entry of 999 characters (after a short one) gets 400 `{"error":"references entry is too long"}`, and no ticket is listed.
+- A `references` entry of 998 characters (unknown ids) gets 201 `{ ticket }`, a new ticket.
+- 101 `references` entries get 400 `{"error":"references has too many entries"}`, and no ticket is listed.
+- 100 `references` entries (unknown ids) get 201 `{ ticket }`, a new ticket.
 - A request over 100 kB (50,000-char `body` + 100,000-char `bodyHTML`) gets 201, so the webhook's own 1 MB `express.json` limit applies instead of the global 100 kB one.
 - A request over 1 MB gets 413 with a JSON `{"error":...}`.
 
@@ -260,7 +266,7 @@ GET:
   - `createUserViaApi(request, label)` creates an agent through POST `/api/users` (the request must be signed in as the admin), asserts 201 and returns its credentials and `id`. Tests that mutate or delete users create their own, so the seeded admin and agent never change.
   - `deleteUserViaApi(request, id)` soft-deletes a user through DELETE `/api/users/:id` (signed in as the admin) and asserts 204.
   - `users.spec.ts` keeps its own `userRow`, `openNewUserDialog`, `submitNewUser`, `openEditDialog`, `openDeleteDialog` and `postSignIn`, which only it uses.
-- **`fixtures/webhook.ts`:** `inboundSecret()` reads `INBOUND_EMAIL_SECRET` from `server/.env.test` (the file `start:test` loads) with `node:util`'s `parseEnv`, so the tests and the server share one value. It reads lazily and throws a clear error if the value is missing, so other specs still load. `webhook.spec.ts` keeps its own `validEmail` (unique sender per call), `uniqueMessageId`, `postInbound`, `expectUnauthorized`, `expectCreated`, `emailOfLength(n)` (a valid, unique address of exactly n characters), `expectNoTicketMatching(request, marker)` (signs in as the admin, GET `/api/tickets?q=` returns `{ tickets: [], total: 0 }`) and `expectTooLong(res, error)`, and for threading `createThreadTicket` (a ticket with a known `messageId`), `replyEmail` (an answer with a unique token in subject and sender, `bodyHTML` and its own `messageId`), `expectReplyCreated`, `listReplies`, `ticketStatus` and `expectNoTicketWith` (the list search for the token totals 0).
+- **`fixtures/webhook.ts`:** `inboundSecret()` reads `INBOUND_EMAIL_SECRET` from `server/.env.test` (the file `start:test` loads) with `node:util`'s `parseEnv`, so the tests and the server share one value. It reads lazily and throws a clear error if the value is missing, so other specs still load. `webhook.spec.ts` keeps its own `validEmail` (unique sender per call), `uniqueMessageId`, `postInbound`, `expectUnauthorized`, `expectCreated`, `emailOfLength(n)` (a valid, unique address of exactly n characters), `expectNoTicketMatching(request, marker)` (signs in as the admin, GET `/api/tickets?q=` returns `{ tickets: [], total: 0 }`; used by both the length-limit and the threading tests) and `expectTooLong(res, error)`, and for threading `createThreadTicket` (a ticket with a known `messageId`), `replyEmail` (an answer with a unique token in subject and sender, `bodyHTML` and its own `messageId`), `expectReplyCreated`, `listReplies` and `ticketStatus`.
 - **`fixtures/tickets.ts`:** `createTicketViaWebhook(request, label, overrides?)` posts a unique email (subject `E2E <label> <suffix>`, unique sender, body `Please help.`) to the inbound webhook with the secret, asserts 201 and returns the ticket's `id`, `subject`, `senderName` and `senderEmail`. `overrides` sets `subject`, `senderName`, `senderEmail`, `body` or `bodyHTML` exactly, for the sorting, search and `bodyHTML` tests; without a `bodyHTML` override none is sent, so the ticket's `bodyHTML` is null. The defaults contain no `%`, `_` or `\`. It needs no session. `updateTicketViaApi(request, ticketId, data)` sends any of `assignedToId`, `status`, `category` (type `TicketUpdate`; `null` unassigns or unclassifies) through PATCH `/api/tickets/:id`, asserts 200 and returns the ticket; the request must be signed in. `tickets.spec.ts` keeps its own `getTicket(request, id)` (GET `/api/tickets/:id`, asserts 200, returns the ticket), `expectUpdated(request, before, data, changes)` (PATCH, then the response equals `before` plus `changes` with a later `updatedAt`, and a GET matches), `currentUserId(request)` (the signed-in user's id from `/api/me`), `listAssignees(request)` (GET `/api/tickets/assignees`, asserts 200 and exactly `{ agents }`), `getTicketPage(request, params)` (GET with sort, filter, search and paging params, asserts 200, returns `{ tickets, total }`), `listTickets(request, params)` (the same, returning only `tickets`), `expectInOrder(tickets, ids)` (the ids are listed in that relative order), `searchOverride(field, token)` (puts a token into one field) `expectAllContain(tickets, text)` (every row holds the text in subject, sender name or email), `expectRowsMatch(tickets, filters)` and `expectFilter(request, filters, id, subject, listed)` (the filter keeps or drops the ticket, and every row of a page of 100 matches), and `createTicketsWithToken(request, token, labels)` (one ticket per label, subject `<token> <label>`).
 - `replies.spec.ts` keeps its own `currentUserId(request)`, `listReplies(request, ticketId)` (GET, asserts 200 and exactly `{ replies }`) and `postReply(request, ticketId, body)` (POST, asserts 201 and exactly `{ reply }`), which only it uses.
 - Helpers are plain exported functions: no page objects and no `test.extend` fixtures.
@@ -297,7 +303,7 @@ GET:
 - **Concurrent assignment:** two PATCHes racing on one ticket (last write wins) can't be observed from a serial test.
 - **The replies UI on the detail page** (`ReplyThread`, `ReplyForm`): covered by component tests, not E2E.
 - **The replies `id asc` tie-break:** two replies with the same `createdAt` can't be forced from a serial test. Customer replies (`author: null`, non-null `bodyHTML`) are now created through the webhook and checked in `webhook.spec.ts`.
-- **Threading edge cases not requested:** a ticket set to `closed` (only `resolved` is tested; the route reopens any non-open status), `references` over 100 entries, a threaded reply without a `messageId` (stored, but can't be deduped), concurrent redelivery of a reply (the P2002 path), and a reply whose `inReplyTo` and `references` point at different tickets (the route takes the first `findFirst` match) aren't tested.
+- **Threading edge cases not requested:** a ticket set to `closed` (only `resolved` is tested; the route reopens any non-open status), a threaded reply without a `messageId` (stored, but can't be deduped), concurrent redelivery of a reply (the P2002 path), and a reply whose `inReplyTo` and `references` point at different tickets (the route takes the first `findFirst` match) aren't tested.
 - **Cascade delete of replies with their ticket:** there is no endpoint that deletes tickets.
 - **A body padded with whitespace past 10,000 characters:** whether the length limit applies to the trimmed text isn't tested.
 - **Not built yet:** sending replies to the customer (no email provider), restoring a deleted user, ticket creation through the API and updates to content (subject, body; PATCH ignores unknown fields), AI features, email, and the dashboard.

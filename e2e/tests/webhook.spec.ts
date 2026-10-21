@@ -169,11 +169,13 @@ async function ticketStatus(request: APIRequestContext, ticketId: number): Promi
   return (await res.json()).ticket.status
 }
 
-// No ticket holds the token in its subject, sender or body.
-async function expectNoTicketWith(request: APIRequestContext, token: string) {
-  const res = await request.get('/api/tickets', { params: { q: token } })
+// The webhook only returns ids, so check through GET /api/tickets that no ticket holds `marker`
+// in its subject, sender name, sender email or body. Signs `request` in as the admin.
+async function expectNoTicketMatching(request: APIRequestContext, marker: string) {
+  await signInViaApi(request, ADMIN)
+  const res = await request.get('/api/tickets', { params: { q: marker } })
   expect(res.status()).toBe(200)
-  expect((await res.json()).total, `tickets matching ${token}`).toBe(0)
+  expect(await res.json()).toEqual({ tickets: [], total: 0 })
 }
 
 test.describe('POST /api/webhooks/inbound-email: threading replies', () => {
@@ -183,8 +185,7 @@ test.describe('POST /api/webhooks/inbound-email: threading replies', () => {
 
     const replyId = await expectReplyCreated(await postInbound(request, data), ticket.id)
 
-    await signInViaApi(request, ADMIN)
-    await expectNoTicketWith(request, token)
+    await expectNoTicketMatching(request, token)
     expect(await listReplies(request, ticket.id)).toEqual([
       {
         id: replyId,
@@ -203,8 +204,7 @@ test.describe('POST /api/webhooks/inbound-email: threading replies', () => {
 
     const replyId = await expectReplyCreated(await postInbound(request, data), ticket.id)
 
-    await signInViaApi(request, ADMIN)
-    await expectNoTicketWith(request, token)
+    await expectNoTicketMatching(request, token)
     const replies = await listReplies(request, ticket.id)
     expect(replies.map((r: { id: number }) => r.id)).toEqual([replyId])
   })
@@ -217,8 +217,7 @@ test.describe('POST /api/webhooks/inbound-email: threading replies', () => {
     const second = replyEmail({ inReplyTo: first.data.messageId })
     const secondId = await expectReplyCreated(await postInbound(request, second.data), ticket.id)
 
-    await signInViaApi(request, ADMIN)
-    await expectNoTicketWith(request, second.token)
+    await expectNoTicketMatching(request, second.token)
     const replies = await listReplies(request, ticket.id)
     expect(replies.map((r: { id: number }) => r.id)).toEqual([firstId, secondId])
     expect(replies[1]).toMatchObject({ body: second.data.body, sender: 'customer', author: null })
@@ -314,15 +313,6 @@ function emailOfLength(length: number) {
   return email
 }
 
-// The webhook only returns an id, so check through GET /api/tickets that nothing with `marker`
-// (searched in subject, sender name and email) was stored. Signs `request` in as the admin.
-async function expectNoTicketMatching(request: APIRequestContext, marker: string) {
-  await signInViaApi(request, ADMIN)
-  const res = await request.get('/api/tickets', { params: { q: marker } })
-  expect(res.status()).toBe(200)
-  expect(await res.json()).toEqual({ tickets: [], total: 0 })
-}
-
 async function expectTooLong(res: APIResponse, error: string) {
   expect(res.status()).toBe(400)
   expect(await res.json()).toEqual({ error })
@@ -412,6 +402,47 @@ test.describe('POST /api/webhooks/inbound-email: length limits', () => {
     const bodyHTML = `<p>${'h'.repeat(100_000 - 7)}</p>`
     expect(bodyHTML).toHaveLength(100_000)
     await expectCreated(await postInbound(request, { ...validEmail(), bodyHTML }))
+  })
+
+  test('400 for a 999-character inReplyTo, and no ticket is stored', async ({ request }) => {
+    const subject = `Too long inReplyTo ${uniqueSuffix()}`
+    const inReplyTo = uniqueMessageId('too-long').padEnd(999, 'r')
+    expect(inReplyTo).toHaveLength(999)
+    await expectTooLong(await postInbound(request, { ...validEmail(), inReplyTo, subject }), 'inReplyTo is too long')
+    await expectNoTicketMatching(request, subject)
+  })
+
+  test('201 for a 998-character inReplyTo (unknown, so a new ticket)', async ({ request }) => {
+    const inReplyTo = uniqueMessageId('at-limit').padEnd(998, 'r')
+    expect(inReplyTo).toHaveLength(998)
+    await expectCreated(await postInbound(request, { ...validEmail(), inReplyTo }))
+  })
+
+  test('400 for a 999-character references entry, and no ticket is stored', async ({ request }) => {
+    const subject = `Too long references entry ${uniqueSuffix()}`
+    const entry = uniqueMessageId('too-long').padEnd(999, 'r')
+    expect(entry).toHaveLength(999)
+    const references = [uniqueMessageId('short'), entry]
+    await expectTooLong(await postInbound(request, { ...validEmail(), references, subject }), 'references entry is too long')
+    await expectNoTicketMatching(request, subject)
+  })
+
+  test('201 for a 998-character references entry (unknown, so a new ticket)', async ({ request }) => {
+    const entry = uniqueMessageId('at-limit').padEnd(998, 'r')
+    expect(entry).toHaveLength(998)
+    await expectCreated(await postInbound(request, { ...validEmail(), references: [uniqueMessageId('short'), entry] }))
+  })
+
+  test('400 for 101 references entries, and no ticket is stored', async ({ request }) => {
+    const subject = `Too many references ${uniqueSuffix()}`
+    const references = Array.from({ length: 101 }, (_, i) => uniqueMessageId(`ref-${i}`))
+    await expectTooLong(await postInbound(request, { ...validEmail(), references, subject }), 'references has too many entries')
+    await expectNoTicketMatching(request, subject)
+  })
+
+  test('201 for 100 references entries (unknown, so a new ticket)', async ({ request }) => {
+    const references = Array.from({ length: 100 }, (_, i) => uniqueMessageId(`ref-${i}`))
+    await expectCreated(await postInbound(request, { ...validEmail(), references }))
   })
 
   test('201 for a request over 100 kB: the webhook has its own 1 MB JSON limit', async ({ request }) => {
