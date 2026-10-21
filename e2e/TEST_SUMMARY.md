@@ -3,8 +3,8 @@
 ## Last run
 
 - **Date:** 2026-10-21
-- **Discovered (`--list`):** 232 tests in 8 files (api-auth 16, login 6, replies 31, routing 5, session 7, tickets 128, users 22, webhook 17)
-- **Result:** 232 passed, 0 failed, 44.5s (chromium).
+- **Discovered (`--list`):** 234 tests in 8 files (api-auth 16, login 6, replies 33, routing 5, session 7, tickets 128, users 22, webhook 17)
+- **Result:** 234 passed, 0 failed, 43.0s (chromium), after adding `bodyHTML` to `Reply`.
 
 ## tests/login.spec.ts
 
@@ -206,8 +206,10 @@ Without a session:
 
 POST:
 
-- The agent and the admin (one test each) reply with a padded body: 201 with exactly `{ reply }`, keys `id`, `body`, `sender`, `createdAt`, `author`; the body trimmed, `sender` `agent`, `author` exactly `{ id, name }` of the signed-in user (id from `/api/me`), a numeric id and a parseable `createdAt`. A following GET returns exactly that reply.
+- The agent and the admin (one test each) reply with a padded body: 201 with exactly `{ reply }`, keys `id`, `body`, `bodyHTML`, `sender`, `createdAt`, `author`; the body trimmed, `sender` `agent`, `author` exactly `{ id, name }` of the signed-in user (id from `/api/me`), a numeric id and a parseable `createdAt`. A following GET returns exactly that reply.
 - A body with `sender: "customer"` and the admin's id as `authorId`, posted by the agent, is stored with `sender` `agent` and the agent as author.
+- An agent reply has the key `bodyHTML` with value `null` in the 201, and the GET list returns it with `bodyHTML: null` too.
+- A `bodyHTML` sent in the POST body is ignored (zod strips it): the 201 reply and the listed reply have `bodyHTML: null`.
 - A body of exactly 10,000 characters gets 201 and is stored whole.
 - 400, with nothing stored (one test each): an empty, whitespace-only, missing, numeric or null body gets `"Reply can't be empty"`; a 10,001-character body gets `"Reply is too long"`.
 - Ids `abc`, `0`, `-1`, `1.5` and `2147483648` get 400 `{"error":"id must be a positive integer"}` (one test each).
@@ -274,7 +276,7 @@ GET:
 - **The assignment UI on the detail page:** covered by component tests, not E2E.
 - **Concurrent assignment:** two PATCHes racing on one ticket (last write wins) can't be observed from a serial test.
 - **The replies UI on the detail page** (`ReplyThread`, `ReplyForm`): covered by component tests, not E2E.
-- **Customer replies and the `id asc` tie-break:** only `POST` writes replies and it always stores `sender: agent`, so a `customer` reply with `author: null` can't be created through the API, and two replies with the same `createdAt` can't be forced from a serial test.
+- **Customer replies and the `id asc` tie-break:** only `POST` writes replies and it always stores `sender: agent` with `bodyHTML: null`, so a `customer` reply with `author: null` or a non-null `bodyHTML` can't be created through the API, and two replies with the same `createdAt` can't be forced from a serial test.
 - **Cascade delete of replies with their ticket:** there is no endpoint that deletes tickets.
 - **A body padded with whitespace past 10,000 characters:** whether the length limit applies to the trimmed text isn't tested.
 - **Not built yet:** sending replies to the customer (no email provider), restoring a deleted user, ticket creation through the API and updates to content (subject, body; PATCH ignores unknown fields), AI features, email, and the dashboard.
@@ -295,5 +297,6 @@ GET:
 - **Unknown PATCH fields are dropped silently:** zod strips them, so `{ subject: "x" }` alone gets the empty-body 400 (`tickets.spec.ts` records this), while `{ status, subject }` would get 200 with the subject ignored (not tested). A `.strict()` schema would reject them instead, if wanted.
 - **Search is a sequential `ILIKE` scan:** the route comment says so; fine at this size, a trigram index or full-text search if the table grows. Not something a test checks.
 - **A soft-deleted agent stays shown as a reply's author:** GET `/api/tickets/:id/replies` doesn't filter `deletedAt` on `author`, the same display-only rule as `assignedTo`. `replies.spec.ts` records this.
+- **A reply's `bodyHTML` will be raw sender HTML:** the route comment says it is unsanitized, like the ticket's. No endpoint stores a non-null value yet, so the tests only check `null`; `ReplyThread` already renders it only through `DOMPurify.sanitize`, covered in `ReplyThread.test.tsx`.
 - **Replies are stored only:** POST answers 201 but nothing is sent to the customer yet (no email provider). The tests record storage only.
 - **App changes needed:** none to run the current suite. Every locator uses an accessible label, role or text.

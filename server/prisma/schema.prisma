@@ -132,6 +132,9 @@ model Reply {
   ticketId  Int
   ticket    Ticket      @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   body      String
+  // HTML version of a customer's email, when the sender included one. Null for agent replies,
+  // which are written as plain text.
+  bodyHTML  String?
   // agent: written in the UI. customer: an email in the ticket's thread (Phase 6).
   sender    ReplySender
   authorId  String?

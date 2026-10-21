@@ -10,12 +10,13 @@ import { createUserViaApi, deleteUserViaApi } from '../fixtures/users.js'
 type Reply = {
   id: number
   body: string
+  bodyHTML: string | null
   sender: string
   createdAt: string
   author: { id: string; name: string } | null
 }
 
-const REPLY_KEYS = ['author', 'body', 'createdAt', 'id', 'sender']
+const REPLY_KEYS = ['author', 'body', 'bodyHTML', 'createdAt', 'id', 'sender']
 const TICKET_ID_ERROR = 'id must be a positive integer'
 const EMPTY_ERROR = "Reply can't be empty"
 const TOO_LONG_ERROR = 'Reply is too long'
@@ -109,6 +110,33 @@ test.describe('POST /api/tickets/:id/replies', () => {
     expect(res.status()).toBe(201)
     const { reply } = await res.json()
     expect(reply).toMatchObject({ body: 'Spoofed?', sender: 'agent', author: { id: agentId, name: AGENT.name } })
+
+    expect(await listReplies(request, ticket.id)).toEqual([reply])
+  })
+
+  test('an agent reply has bodyHTML null in the 201 and in the GET list', async ({ request }) => {
+    const ticket = await createTicketViaWebhook(request, 'reply-html-null')
+    await signInViaApi(request, AGENT)
+
+    const reply = await postReply(request, ticket.id, 'Plain text only')
+    expect(reply).toHaveProperty('bodyHTML', null)
+
+    const [listed] = await listReplies(request, ticket.id)
+    expect(listed).toHaveProperty('bodyHTML', null)
+    expect(listed).toEqual(reply)
+  })
+
+  test('a client-supplied bodyHTML is ignored and stored as null', async ({ request }) => {
+    const ticket = await createTicketViaWebhook(request, 'reply-html-spoof')
+    await signInViaApi(request, AGENT)
+
+    const res = await request.post(`/api/tickets/${ticket.id}/replies`, {
+      data: { body: 'With HTML?', bodyHTML: '<p>With <b>HTML</b>?</p>' },
+    })
+    expect(res.status()).toBe(201)
+    const { reply } = await res.json()
+    expect(reply).toMatchObject({ body: 'With HTML?', sender: 'agent' })
+    expect(reply).toHaveProperty('bodyHTML', null)
 
     expect(await listReplies(request, ticket.id)).toEqual([reply])
   })
