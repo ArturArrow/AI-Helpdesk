@@ -28,6 +28,12 @@ app.use("/api/auth", (req, _res, next) => {
 // Must be mounted before express.json(), which would consume the request body.
 app.all("/api/auth/*splat", toNodeHandler(auth));
 
+// Called by the mail pipeline, not a signed-in user: a shared secret instead of a session.
+// Emails can be larger than the 100 kB default, so the webhooks get their own 1 MB parser
+// (the schema caps body and bodyHTML), after the secret check so only a known caller can
+// send that much. Mounted before the global parser, which then skips these requests.
+app.use("/api/webhooks", requireWebhookSecret, express.json({ limit: "1mb" }), webhookRouter);
+
 app.use(express.json());
 
 // Every /api/users route is admin-only; guarding the prefix covers routes added later.
@@ -35,9 +41,6 @@ app.use("/api/users", requireAuth, requireAdmin, usersRouter);
 
 // Tickets are worked by agents and admins alike, so any signed-in user may read and assign them.
 app.use("/api/tickets", requireAuth, ticketsRouter);
-
-// Called by the mail pipeline, not a signed-in user: a shared secret instead of a session.
-app.use("/api/webhooks", requireWebhookSecret, webhookRouter);
 
 app.get("/api/me", requireAuth, (req, res) => {
   res.json({ user: req.user });
