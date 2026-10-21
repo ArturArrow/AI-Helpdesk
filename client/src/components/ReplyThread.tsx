@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import axios from 'axios'
+import DOMPurify from 'dompurify'
 import { ReplySender, replySenderLabels } from 'core/constants/replySender'
 import type { TicketDetailData } from 'core/constants/ticket'
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card.tsx'
@@ -10,6 +11,8 @@ import { repliesQueryKey } from '@/lib/replies.ts'
 export interface Reply {
   id: number
   body: string
+  // Null for agent replies, and for customer emails without an HTML part.
+  bodyHTML: string | null
   sender: ReplySender
   createdAt: string
   // Null for ReplySender.customer.
@@ -60,7 +63,15 @@ function ReplyThread({ ticket }: { ticket: Pick<TicketDetailData, 'id'> }) {
                       <time dateTime={reply.createdAt}>{new Date(reply.createdAt).toLocaleString()}</time>
                     </CardDescription>
                   </CardHeader>
-                  <CardContent className="text-sm wrap-break-word whitespace-pre-wrap">{reply.body}</CardContent>
+                  {/* The HTML comes from the sender, so it is always sanitized before it is rendered. */}
+                  {reply.bodyHTML ? (
+                    <CardContent
+                      className="text-sm wrap-break-word"
+                      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(reply.bodyHTML) }}
+                    />
+                  ) : (
+                    <CardContent className="text-sm wrap-break-word whitespace-pre-wrap">{reply.body}</CardContent>
+                  )}
                 </Card>
               </li>
             )

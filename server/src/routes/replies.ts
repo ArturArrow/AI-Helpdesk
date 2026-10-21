@@ -8,10 +8,11 @@ import { validate, validateParams } from "../lib/validate";
 // Mounted by ticketsRouter on /:id/replies; mergeParams exposes that :id here.
 export const repliesRouter = Router({ mergeParams: true });
 
-// author is null for ReplySender.customer.
+// author is null for ReplySender.customer. bodyHTML is the sender's raw, unsanitized HTML.
 const replySelect = {
   id: true,
   body: true,
+  bodyHTML: true,
   sender: true,
   createdAt: true,
   author: { select: { id: true, name: true } },

@@ -21,6 +21,13 @@ export const inboundEmailSchema = z.object({
   body: z.string({ error: "body is required" }).trim().min(1, "body is required"),
   bodyHTML: z.string().optional(),
   messageId: z.string().trim().min(1).optional(),
+  // Threading headers: In-Reply-To and the Message-IDs listed in References. An email that
+  // points at a known ticket or customer reply is stored as a reply on that ticket.
+  inReplyTo: z.string().trim().min(1).optional(),
+  references: z
+    .array(z.string().trim().min(1), { error: "references must be an array of Message-IDs" })
+    .max(100, "references has too many entries")
+    .optional(),
 });
 
 export type InboundEmailInput = z.input<typeof inboundEmailSchema>;
