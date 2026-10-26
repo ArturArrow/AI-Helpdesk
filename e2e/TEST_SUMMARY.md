@@ -2,9 +2,9 @@
 
 ## Last run
 
-- **Date:** 2026-10-22
-- **Discovered (`--list`):** 277 tests in 8 files.
-- **Result:** 277 passed, 0 failed, 48.8s (chromium).
+- **Date:** 2026-10-26
+- **Discovered (`--list`):** 287 tests in 8 files.
+- **Result:** 287 passed, 0 failed, 1.2m (chromium).
 
 ## tests/login.spec.ts
 
@@ -118,7 +118,7 @@ POST `/api/webhooks/inbound-email`. The route returns `{"ticket":{"id":<number>}
 
 ## tests/tickets.spec.ts
 
-GET `/api/tickets`, GET `/api/tickets/:id`, GET `/api/tickets/assignees` and PATCH `/api/tickets/:id`, at the API only (the page UI is in Vitest). Other specs create tickets too and the list is paginated (10 by default, `DEFAULT_TICKET_PAGE_SIZE`), so each test narrows the list to its own tickets with `q=<unique token>`, or uses `pageSize=100` when a check covers every row. They compare relative order, never positions or counts, except where `q` makes the matching set exactly the test's tickets.
+GET `/api/tickets`, GET `/api/tickets/:id`, GET `/api/tickets/assignees`, PATCH `/api/tickets/:id` and POST `/api/tickets/:id/summary`, at the API only (the page UI is in Vitest). Other specs create tickets too and the list is paginated (10 by default, `DEFAULT_TICKET_PAGE_SIZE`), so each test narrows the list to its own tickets with `q=<unique token>`, or uses `pageSize=100` when a check covers every row. They compare relative order, never positions or counts, except where `q` makes the matching set exactly the test's tickets.
 
 - GET `/api/tickets` without a session gets 401 `{"error":"Unauthorized"}`.
 - The agent gets 200 and the list holds a ticket just created through the webhook.
@@ -220,6 +220,14 @@ Status and category (PATCH `/api/tickets/:id` with `status` and/or `category`). 
 - A valid status and category with the admin's id as `assignedToId` get 400 `"assignedToId must be an active agent"`, and neither status nor category changes.
 - GET `/api/tickets` filters follow the changes: after `status: resolved` the ticket is listed under `status=resolved` and not `status=open`; after `category: refund_request` it is listed under `category=refund_request` and `resolved` + `refund_request`, not under `unclassified`. Every row of each filtered page of 100 matches.
 
+Summary (POST `/api/tickets/:id/summary`, no body; the test server has no `OPENAI_API_KEY`, so a request for an existing ticket ends at 503 and OpenAI is never called):
+
+- Without a session, both an existing id and `abc` get 401 `{"error":"Unauthorized"}`.
+- The agent and the admin (one test each) get 503 `{"error":"AI isn't configured"}` for an existing ticket.
+- A ticket with one posted reply: after a summary call (503) GET returns the same ticket and the same one-reply thread.
+- Ids `abc`, `0`, `-1`, `1.5` and `2147483648` get 400 `{"error":"id must be a positive integer"}` (one test each).
+- `2147483647` (valid but nonexistent) gets 404 `{"error":"Ticket not found"}`, not 503 (lookup before the AI check).
+
 ## tests/replies.spec.ts
 
 GET and POST `/api/tickets/:id/replies` and POST `/api/tickets/:id/replies/polish`, at the API only (the thread and reply form are covered by component tests). Each test creates its own ticket through the webhook, so a thread holds exactly the replies the test posted.
@@ -251,7 +259,7 @@ GET:
 - Ids `abc`, `0`, `-1`, `1.5` and `2147483648` get 400 with the id message (one test each).
 - `2147483647` gets 404 `{"error":"Ticket not found"}`.
 
-POST `/polish` (the test server has no `OPENAI_API_KEY`, so a valid request ends at 503 and OpenAI is never called):
+POST `/polish` (the test server has no `OPENAI_API_KEY`, so a valid request ends at 503 and OpenAI is never called; the ticket lookup is `loadTicketContext`, shared with POST `/summary`):
 
 - Without a session: 401 `{"error":"Unauthorized"}` for an existing id and for `abc`, and the thread stays `[]`.
 - The agent and the admin (one test each) get 503 `{"error":"AI isn't configured"}` for a valid request on an existing ticket, and the thread stays `[]`.
@@ -319,8 +327,8 @@ POST `/polish` (the test server has no `OPENAI_API_KEY`, so a valid request ends
 - **Threading edge cases not requested:** a ticket set to `closed` (only `resolved` is tested; the route reopens any non-open status), a threaded reply without a `messageId` (stored, but can't be deduped), concurrent redelivery of a reply (the P2002 path), and a reply whose `inReplyTo` and `references` point at different tickets (the route takes the first `findFirst` match) aren't tested.
 - **Cascade delete of replies with their ticket:** there is no endpoint that deletes tickets.
 - **A body padded with whitespace past 10,000 characters:** whether the length limit applies to the trimmed text isn't tested.
-- **The polish success path:** a 200 `{ body }` from OpenAI needs `OPENAI_API_KEY` on the test server and a real (or stubbed) model call; deliberately not tested. The polish UI in `ReplyForm` belongs in component tests.
-- **Not built yet:** sending replies to the customer (no email provider), restoring a deleted user, ticket creation through the API and updates to content (subject, body; PATCH ignores unknown fields), AI features other than reply polishing, email, and the dashboard.
+- **The polish and summary success paths:** a 200 `{ body }` or `{ summary }` from OpenAI needs `OPENAI_API_KEY` on the test server and a real (or stubbed) model call; deliberately not tested. What `loadTicketContext` passes to the model (latest 20 replies, oldest first, plain-text bodies) isn't observable through the API either; that belongs in server unit tests. The polish UI in `ReplyForm` and the summary UI (`TicketSummary`) belong in component tests.
+- **Not built yet:** sending replies to the customer (no email provider), restoring a deleted user, ticket creation through the API and updates to content (subject, body; PATCH ignores unknown fields), AI features other than reply polishing and ticket summaries, email, and the dashboard.
 
 ## Open questions
 
@@ -342,5 +350,5 @@ POST `/polish` (the test server has no `OPENAI_API_KEY`, so a valid request ends
 - **Threading doesn't check the sender:** any email naming a known Message-ID becomes a customer reply on that ticket, whoever sent it (the route comment allows for CC'd senders), and the reply stores no sender address. Not asserted either way.
 - **Replies are stored only:** POST answers 201 but nothing is sent to the customer yet (no email provider). The tests record storage only.
 - **Resolved: the 1 MB webhook parser runs after the secret check.** `index.ts` mounts `requireWebhookSecret, express.json({ limit: "1mb" }), webhookRouter` together, so an unauthenticated caller gets 401 before any body is read. Not tested that the body is unread.
-- **The polish 503 tests depend on the key being absent:** `webServer` inherits the shell's environment, so a `OPENAI_API_KEY` exported in the shell (or added to `server/.env.test`) would turn them into real OpenAI calls and fail them.
+- **The polish and summary 503 tests depend on the key being absent:** `webServer` inherits the shell's environment, so a `OPENAI_API_KEY` exported in the shell (or added to `server/.env.test`) would turn them into real OpenAI calls and fail them.
 - **App changes needed:** none to run the current suite. Every locator uses an accessible label, role or text.

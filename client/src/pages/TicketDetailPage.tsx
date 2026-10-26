@@ -7,6 +7,7 @@ import ReplyForm from '@/components/ReplyForm.tsx'
 import ReplyThread from '@/components/ReplyThread.tsx'
 import TicketDetail from '@/components/TicketDetail.tsx'
 import TicketDetailSkeleton from '@/components/TicketDetailSkeleton.tsx'
+import TicketSummary from '@/components/TicketSummary.tsx'
 import UpdateTicket from '@/components/UpdateTicket.tsx'
 import { errorMessage } from '@/lib/errorMessage.ts'
 
@@ -45,6 +46,7 @@ function TicketDetailPage() {
           <div className="grid gap-6 lg:grid-cols-[1fr_16rem]">
             <div className="min-w-0 space-y-6">
               <TicketDetail ticket={ticket} />
+              <TicketSummary ticket={ticket} />
               <ReplyThread ticket={ticket} />
               <ReplyForm ticket={ticket} />
             </div>

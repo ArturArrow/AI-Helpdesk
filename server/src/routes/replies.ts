@@ -2,8 +2,9 @@ import { Router } from "express";
 import { createReplySchema } from "core/schemas/replies";
 import { ticketIdParamsSchema } from "core/schemas/tickets";
 import { ReplySender } from "../../generated/prisma/enums";
-import { isAiConfigured, MAX_CONTEXT_REPLIES, polishReply } from "../lib/ai";
+import { isAiConfigured, polishReply } from "../lib/ai";
 import { prisma } from "../lib/db";
+import { loadTicketContext } from "../lib/ticketContext";
 import { validate, validateParams } from "../lib/validate";
 
 // Mounted by ticketsRouter on /:id/replies; mergeParams exposes that :id here.
@@ -68,20 +69,7 @@ repliesRouter.post("/polish", async (req, res) => {
   const body = validate(createReplySchema, req, res);
   if (!body) return;
 
-  const ticket = await prisma.ticket.findUnique({
-    where: { id: params.id },
-    select: {
-      subject: true,
-      body: true,
-      senderName: true,
-      // The latest replies, newest first; reversed below to read oldest first.
-      replies: {
-        select: { body: true, sender: true },
-        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-        take: MAX_CONTEXT_REPLIES,
-      },
-    },
-  });
+  const ticket = await loadTicketContext(params.id);
   if (!ticket) {
     res.status(404).json({ error: "Ticket not found" });
     return;
@@ -91,6 +79,5 @@ repliesRouter.post("/polish", async (req, res) => {
     return;
   }
   // requireAuth (mounted on /api/tickets) has set req.user; the reply is signed with their name.
-  const context = { ...ticket, replies: ticket.replies.reverse() };
-  res.json({ body: await polishReply(body.body, context, req.user!.name) });
+  res.json({ body: await polishReply(body.body, ticket, req.user!.name) });
 });
