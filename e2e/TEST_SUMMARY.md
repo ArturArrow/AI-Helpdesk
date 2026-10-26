@@ -2,9 +2,9 @@
 
 ## Last run
 
-- **Date:** 2026-10-21
-- **Discovered (`--list`):** 260 tests in 8 files.
-- **Result:** 260 passed, 0 failed, 1.0m (chromium), after making `DELETE /api/users/:id` unassign the deleted agent's tickets, adding its tests to `users.spec.ts` and removing the soft-deleted-assignee detail test from `tickets.spec.ts`.
+- **Date:** 2026-10-22
+- **Discovered (`--list`):** 277 tests in 8 files.
+- **Result:** 277 passed, 0 failed, 48.8s (chromium).
 
 ## tests/login.spec.ts
 
@@ -222,7 +222,7 @@ Status and category (PATCH `/api/tickets/:id` with `status` and/or `category`). 
 
 ## tests/replies.spec.ts
 
-GET and POST `/api/tickets/:id/replies`, at the API only (the thread and reply form are covered by component tests). Each test creates its own ticket through the webhook, so a thread holds exactly the replies the test posted.
+GET and POST `/api/tickets/:id/replies` and POST `/api/tickets/:id/replies/polish`, at the API only (the thread and reply form are covered by component tests). Each test creates its own ticket through the webhook, so a thread holds exactly the replies the test posted.
 
 Without a session:
 
@@ -250,6 +250,18 @@ GET:
 - A reply posted by a fresh agent (created by the admin, signed in in its own request context), who is then soft-deleted: GET by the admin and by the seeded agent still returns the reply unchanged, with `author` exactly the deleted agent's `{ id, name }`.
 - Ids `abc`, `0`, `-1`, `1.5` and `2147483648` get 400 with the id message (one test each).
 - `2147483647` gets 404 `{"error":"Ticket not found"}`.
+
+POST `/polish` (the test server has no `OPENAI_API_KEY`, so a valid request ends at 503 and OpenAI is never called):
+
+- Without a session: 401 `{"error":"Unauthorized"}` for an existing id and for `abc`, and the thread stays `[]`.
+- The agent and the admin (one test each) get 503 `{"error":"AI isn't configured"}` for a valid request on an existing ticket, and the thread stays `[]`.
+- A ticket with one posted reply: after a polish call (503) GET returns exactly that reply.
+- A body of exactly 10,000 characters passes validation (503, not 400).
+- 400, with nothing stored (one test each): an empty, whitespace-only or missing body gets `"Reply can't be empty"`; a 10,001-character body gets `"Reply is too long"`.
+- Ids `abc`, `0`, `-1`, `1.5` and `2147483648` get 400 with the id message (one test each).
+- An invalid id with an empty body gets the id error (params first).
+- `2147483647` with an empty body gets the body error (body validated before the ticket lookup).
+- `2147483647` with a valid body gets 404 `{"error":"Ticket not found"}`, not 503 (lookup before the AI check).
 
 ## Harness helpers
 
@@ -307,7 +319,8 @@ GET:
 - **Threading edge cases not requested:** a ticket set to `closed` (only `resolved` is tested; the route reopens any non-open status), a threaded reply without a `messageId` (stored, but can't be deduped), concurrent redelivery of a reply (the P2002 path), and a reply whose `inReplyTo` and `references` point at different tickets (the route takes the first `findFirst` match) aren't tested.
 - **Cascade delete of replies with their ticket:** there is no endpoint that deletes tickets.
 - **A body padded with whitespace past 10,000 characters:** whether the length limit applies to the trimmed text isn't tested.
-- **Not built yet:** sending replies to the customer (no email provider), restoring a deleted user, ticket creation through the API and updates to content (subject, body; PATCH ignores unknown fields), AI features, email, and the dashboard.
+- **The polish success path:** a 200 `{ body }` from OpenAI needs `OPENAI_API_KEY` on the test server and a real (or stubbed) model call; deliberately not tested. The polish UI in `ReplyForm` belongs in component tests.
+- **Not built yet:** sending replies to the customer (no email provider), restoring a deleted user, ticket creation through the API and updates to content (subject, body; PATCH ignores unknown fields), AI features other than reply polishing, email, and the dashboard.
 
 ## Open questions
 
@@ -329,4 +342,5 @@ GET:
 - **Threading doesn't check the sender:** any email naming a known Message-ID becomes a customer reply on that ticket, whoever sent it (the route comment allows for CC'd senders), and the reply stores no sender address. Not asserted either way.
 - **Replies are stored only:** POST answers 201 but nothing is sent to the customer yet (no email provider). The tests record storage only.
 - **Resolved: the 1 MB webhook parser runs after the secret check.** `index.ts` mounts `requireWebhookSecret, express.json({ limit: "1mb" }), webhookRouter` together, so an unauthenticated caller gets 401 before any body is read. Not tested that the body is unread.
+- **The polish 503 tests depend on the key being absent:** `webServer` inherits the shell's environment, so a `OPENAI_API_KEY` exported in the shell (or added to `server/.env.test`) would turn them into real OpenAI calls and fail them.
 - **App changes needed:** none to run the current suite. Every locator uses an accessible label, role or text.

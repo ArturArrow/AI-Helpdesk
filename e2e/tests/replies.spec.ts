@@ -284,3 +284,104 @@ test.describe('GET /api/tickets/:id/replies', () => {
     expect(await res.json()).toEqual({ error: 'Ticket not found' })
   })
 })
+
+// POST /api/tickets/:id/replies/polish: validates like POST /replies, stores nothing. The test
+// server has no OPENAI_API_KEY (server/.env.test doesn't set it), so every request
+// that passes validation ends at 503 and OpenAI is never called.
+test.describe('POST /api/tickets/:id/replies/polish', () => {
+  const AI_OFF = { error: "AI isn't configured" }
+
+  test('without a session gets 401 for an existing id and for abc, and stores nothing', async ({ request }) => {
+    const ticket = await createTicketViaWebhook(request, 'polish-401')
+    for (const id of [ticket.id, 'abc']) {
+      const res = await request.post(`/api/tickets/${id}/replies/polish`, { data: { body: 'Polish me' } })
+      expect(res.status(), `POST id ${id}`).toBe(401)
+      expect(await res.json()).toEqual({ error: 'Unauthorized' })
+    }
+
+    await signInViaApi(request, AGENT)
+    expect(await listReplies(request, ticket.id)).toEqual([])
+  })
+
+  for (const user of [AGENT, ADMIN] as Credentials[]) {
+    test(`the ${user.name.toLowerCase()} gets 503 ${JSON.stringify(AI_OFF.error)} for a valid request, and no reply is stored`, async ({ request }) => {
+      const ticket = await createTicketViaWebhook(request, `polish-503-${user.name.toLowerCase()}`)
+      await signInViaApi(request, user)
+
+      const res = await request.post(`/api/tickets/${ticket.id}/replies/polish`, { data: { body: 'thx we r on it' } })
+      expect(res.status()).toBe(503)
+      expect(await res.json()).toEqual(AI_OFF)
+
+      expect(await listReplies(request, ticket.id)).toEqual([])
+    })
+  }
+
+  test('leaves an existing thread unchanged', async ({ request }) => {
+    const ticket = await createTicketViaWebhook(request, 'polish-thread')
+    await signInViaApi(request, AGENT)
+    const reply = await postReply(request, ticket.id, 'Already sent')
+
+    const res = await request.post(`/api/tickets/${ticket.id}/replies/polish`, { data: { body: 'A new draft' } })
+    expect(res.status()).toBe(503)
+
+    expect(await listReplies(request, ticket.id)).toEqual([reply])
+  })
+
+  test('a body of exactly 10,000 characters passes validation (503, not 400)', async ({ request }) => {
+    const ticket = await createTicketViaWebhook(request, 'polish-max')
+    await signInViaApi(request, AGENT)
+
+    const res = await request.post(`/api/tickets/${ticket.id}/replies/polish`, { data: { body: 'x'.repeat(10_000) } })
+    expect(res.status()).toBe(503)
+    expect(await res.json()).toEqual(AI_OFF)
+  })
+
+  const invalidBodies: [string, unknown, string][] = [
+    ['an empty body', { body: '' }, EMPTY_ERROR],
+    ['a whitespace-only body', { body: ' \n\t ' }, EMPTY_ERROR],
+    ['a missing body', {}, EMPTY_ERROR],
+    ['a 10,001-character body', { body: 'x'.repeat(10_001) }, TOO_LONG_ERROR],
+  ]
+  for (const [label, data, error] of invalidBodies) {
+    test(`${label} gets 400 ${JSON.stringify(error)} and stores nothing`, async ({ request }) => {
+      const ticket = await createTicketViaWebhook(request, 'polish-invalid')
+      await signInViaApi(request, AGENT)
+
+      const res = await request.post(`/api/tickets/${ticket.id}/replies/polish`, { data })
+      expect(res.status()).toBe(400)
+      expect(await res.json()).toEqual({ error })
+
+      expect(await listReplies(request, ticket.id)).toEqual([])
+    })
+  }
+
+  for (const id of ['abc', '0', '-1', '1.5', '2147483648']) {
+    test(`id ${id} gets 400 ${JSON.stringify(TICKET_ID_ERROR)}`, async ({ request }) => {
+      await signInViaApi(request, AGENT)
+      const res = await request.post(`/api/tickets/${id}/replies/polish`, { data: { body: 'Hello' } })
+      expect(res.status()).toBe(400)
+      expect(await res.json()).toEqual({ error: TICKET_ID_ERROR })
+    })
+  }
+
+  test('an invalid id with an empty body gets the id error (params are checked first)', async ({ request }) => {
+    await signInViaApi(request, AGENT)
+    const res = await request.post('/api/tickets/abc/replies/polish', { data: { body: '' } })
+    expect(res.status()).toBe(400)
+    expect(await res.json()).toEqual({ error: TICKET_ID_ERROR })
+  })
+
+  test(`a nonexistent id (${MISSING_ID}) with an empty body gets the body error (body before lookup)`, async ({ request }) => {
+    await signInViaApi(request, AGENT)
+    const res = await request.post(`/api/tickets/${MISSING_ID}/replies/polish`, { data: { body: '' } })
+    expect(res.status()).toBe(400)
+    expect(await res.json()).toEqual({ error: EMPTY_ERROR })
+  })
+
+  test(`a valid but nonexistent id (${MISSING_ID}) gets 404, not 503 (lookup before the AI check)`, async ({ request }) => {
+    await signInViaApi(request, AGENT)
+    const res = await request.post(`/api/tickets/${MISSING_ID}/replies/polish`, { data: { body: 'Hello' } })
+    expect(res.status()).toBe(404)
+    expect(await res.json()).toEqual({ error: 'Ticket not found' })
+  })
+})
