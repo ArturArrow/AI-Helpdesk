@@ -286,8 +286,8 @@ test.describe('GET /api/tickets/:id/replies', () => {
 })
 
 // POST /api/tickets/:id/replies/polish: validates like POST /replies, stores nothing. The test
-// server has no GOOGLE_GENERATIVE_AI_API_KEY (server/.env.test doesn't set it), so every request
-// that passes validation ends at 503 and Gemini is never called.
+// server has no OPENAI_API_KEY (server/.env.test doesn't set it), so every request
+// that passes validation ends at 503 and OpenAI is never called.
 test.describe('POST /api/tickets/:id/replies/polish', () => {
   const AI_OFF = { error: "AI isn't configured" }
 

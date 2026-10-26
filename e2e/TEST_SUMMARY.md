@@ -251,7 +251,7 @@ GET:
 - Ids `abc`, `0`, `-1`, `1.5` and `2147483648` get 400 with the id message (one test each).
 - `2147483647` gets 404 `{"error":"Ticket not found"}`.
 
-POST `/polish` (the test server has no `GOOGLE_GENERATIVE_AI_API_KEY`, so a valid request ends at 503 and Gemini is never called):
+POST `/polish` (the test server has no `OPENAI_API_KEY`, so a valid request ends at 503 and OpenAI is never called):
 
 - Without a session: 401 `{"error":"Unauthorized"}` for an existing id and for `abc`, and the thread stays `[]`.
 - The agent and the admin (one test each) get 503 `{"error":"AI isn't configured"}` for a valid request on an existing ticket, and the thread stays `[]`.
@@ -319,7 +319,7 @@ POST `/polish` (the test server has no `GOOGLE_GENERATIVE_AI_API_KEY`, so a vali
 - **Threading edge cases not requested:** a ticket set to `closed` (only `resolved` is tested; the route reopens any non-open status), a threaded reply without a `messageId` (stored, but can't be deduped), concurrent redelivery of a reply (the P2002 path), and a reply whose `inReplyTo` and `references` point at different tickets (the route takes the first `findFirst` match) aren't tested.
 - **Cascade delete of replies with their ticket:** there is no endpoint that deletes tickets.
 - **A body padded with whitespace past 10,000 characters:** whether the length limit applies to the trimmed text isn't tested.
-- **The polish success path:** a 200 `{ body }` from Gemini needs `GOOGLE_GENERATIVE_AI_API_KEY` on the test server and a real (or stubbed) model call; deliberately not tested. The polish UI in `ReplyForm` belongs in component tests.
+- **The polish success path:** a 200 `{ body }` from OpenAI needs `OPENAI_API_KEY` on the test server and a real (or stubbed) model call; deliberately not tested. The polish UI in `ReplyForm` belongs in component tests.
 - **Not built yet:** sending replies to the customer (no email provider), restoring a deleted user, ticket creation through the API and updates to content (subject, body; PATCH ignores unknown fields), AI features other than reply polishing, email, and the dashboard.
 
 ## Open questions
@@ -342,5 +342,5 @@ POST `/polish` (the test server has no `GOOGLE_GENERATIVE_AI_API_KEY`, so a vali
 - **Threading doesn't check the sender:** any email naming a known Message-ID becomes a customer reply on that ticket, whoever sent it (the route comment allows for CC'd senders), and the reply stores no sender address. Not asserted either way.
 - **Replies are stored only:** POST answers 201 but nothing is sent to the customer yet (no email provider). The tests record storage only.
 - **Resolved: the 1 MB webhook parser runs after the secret check.** `index.ts` mounts `requireWebhookSecret, express.json({ limit: "1mb" }), webhookRouter` together, so an unauthenticated caller gets 401 before any body is read. Not tested that the body is unread.
-- **The polish 503 tests depend on the key being absent:** `webServer` inherits the shell's environment, so a `GOOGLE_GENERATIVE_AI_API_KEY` exported in the shell (or added to `server/.env.test`) would turn them into real Gemini calls and fail them.
+- **The polish 503 tests depend on the key being absent:** `webServer` inherits the shell's environment, so a `OPENAI_API_KEY` exported in the shell (or added to `server/.env.test`) would turn them into real OpenAI calls and fail them.
 - **App changes needed:** none to run the current suite. Every locator uses an accessible label, role or text.

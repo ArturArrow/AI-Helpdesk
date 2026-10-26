@@ -17,10 +17,10 @@
     "db:seed:tickets": "bun run prisma/seed-tickets.ts"
   },
   "dependencies": {
-    "@ai-sdk/google": "^4.0.102",
+    "@ai-sdk/openai": "^4.0.102",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
-    "ai": "^7.0.148",
+    "ai": "^7.0.153",
     "better-auth": "^1.7.4",
     "core": "workspace:*",
     "cors": "^2.8.5",

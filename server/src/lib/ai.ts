@@ -1,11 +1,11 @@
-import { createGoogle } from "@ai-sdk/google";
+import { createOpenAI } from "@ai-sdk/openai";
 import { generateText } from "ai";
 import type { ReplySender } from "../../generated/prisma/enums";
-import { GOOGLE_GENERATIVE_AI_API_KEY } from "./env";
+import { OPENAI_API_KEY } from "./env";
 
-const google = createGoogle({ apiKey: GOOGLE_GENERATIVE_AI_API_KEY });
+const openai = createOpenAI({ apiKey: OPENAI_API_KEY });
 
-export const isAiConfigured = Boolean(GOOGLE_GENERATIVE_AI_API_KEY);
+export const isAiConfigured = Boolean(OPENAI_API_KEY);
 
 // Caps on the thread sent as context, to bound the prompt's cost and latency.
 export const MAX_CONTEXT_REPLIES = 20;
@@ -56,14 +56,16 @@ function polishPrompt(draft: string, ticket: PolishContext, agentName: string): 
   ].join("\n\n");
 }
 
-// The agent's draft rewritten by Gemini, with the ticket's thread as context, greeting the customer
+// The agent's draft rewritten by OpenAI, with the ticket's thread as context, greeting the customer
 // by first name and signed with the agent's name and SIGNATURE_URL. Nothing is stored.
 export async function polishReply(draft: string, ticket: PolishContext, agentName: string): Promise<string> {
   const { text } = await generateText({
-    model: google("gemini-3.5-flash-lite"),
+    model: openai("gpt-6-luna"),
+    // Polishing a draft needs little reasoning; low keeps the button fast and cheap.
+    providerOptions: { openai: { reasoningEffort: "low" } },
     system: POLISH_SYSTEM_PROMPT,
     prompt: polishPrompt(draft, ticket, agentName),
-    // Gemini can accept a request and never answer under load; fail instead of hanging the button.
+    // A model can accept a request and never answer under load; fail instead of hanging the button.
     abortSignal: AbortSignal.timeout(30_000),
   });
   return text.trim();
