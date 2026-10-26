@@ -1,5 +1,7 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateText } from "ai";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { ReplySender } from "../../generated/prisma/enums";
 import { OPENAI_API_KEY } from "./env";
 
@@ -42,13 +44,23 @@ export interface TicketContext {
   replies: { body: string; sender: ReplySender }[];
 }
 
-// Prints the full prompt sent to the model, for debugging. Off in production, where it would put
-// customer messages in the logs, and in tests.
+// Saves the full prompt sent to the model to server/logs/ai-prompt-<feature>.log, overwritten on
+// every call, for debugging. Off in production, where it would put customer messages on disk,
+// and in tests.
 const LOG_PROMPTS = process.env.NODE_ENV !== "production" && process.env.NODE_ENV !== "test";
+const PROMPT_LOG_DIR = join(import.meta.dirname, "../../logs");
 
 function logPrompt(feature: string, system: string, prompt: string) {
   if (!LOG_PROMPTS) return;
-  console.log(`[ai] ${feature} prompt\n--- system ---\n${system}\n--- prompt ---\n${prompt}\n--- end ---`);
+  const file = join(PROMPT_LOG_DIR, `ai-prompt-${feature}.log`);
+  try {
+    mkdirSync(PROMPT_LOG_DIR, { recursive: true });
+    writeFileSync(file, `${new Date().toISOString()}\n--- system ---\n${system}\n--- prompt ---\n${prompt}\n`);
+    console.log(`[ai] ${feature} prompt saved to ${file}`);
+  } catch (error) {
+    // Only a debugging aid: never fail the request over it.
+    console.warn(`[ai] couldn't save the ${feature} prompt:`, error);
+  }
 }
 
 // Stops a message from closing or opening our tags, and caps its length.
