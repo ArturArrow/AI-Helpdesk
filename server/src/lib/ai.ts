@@ -42,6 +42,15 @@ export interface TicketContext {
   replies: { body: string; sender: ReplySender }[];
 }
 
+// Prints the full prompt sent to the model, for debugging. Off in production, where it would put
+// customer messages in the logs, and in tests.
+const LOG_PROMPTS = process.env.NODE_ENV !== "production" && process.env.NODE_ENV !== "test";
+
+function logPrompt(feature: string, system: string, prompt: string) {
+  if (!LOG_PROMPTS) return;
+  console.log(`[ai] ${feature} prompt\n--- system ---\n${system}\n--- prompt ---\n${prompt}\n--- end ---`);
+}
+
 // Stops a message from closing or opening our tags, and caps its length.
 function contextText(text: string): string {
   const trimmed =
@@ -74,12 +83,14 @@ function polishPrompt(draft: string, ticket: TicketContext, agentName: string): 
 // The agent's draft rewritten by OpenAI, with the ticket's thread as context, greeting the customer
 // by first name and signed with the agent's name and SIGNATURE_URL. Nothing is stored.
 export async function polishReply(draft: string, ticket: TicketContext, agentName: string): Promise<string> {
+  const prompt = polishPrompt(draft, ticket, agentName);
+  logPrompt("polish", POLISH_SYSTEM_PROMPT, prompt);
   const { text } = await generateText({
     model: openai("gpt-6-luna"),
     // Polishing a draft needs little reasoning; low keeps the button fast and cheap.
     providerOptions: { openai: { reasoningEffort: "low" } },
     system: POLISH_SYSTEM_PROMPT,
-    prompt: polishPrompt(draft, ticket, agentName),
+    prompt,
     // A model can accept a request and never answer under load; fail instead of hanging the button.
     abortSignal: AbortSignal.timeout(30_000),
   });
@@ -89,11 +100,13 @@ export async function polishReply(draft: string, ticket: TicketContext, agentNam
 // A short summary of the ticket and its thread for the agent. Nothing is stored, so every call
 // summarizes the thread as it is now.
 export async function summarizeTicket(ticket: TicketContext): Promise<string> {
+  const prompt = threadPrompt(ticket).join("\n\n");
+  logPrompt("summary", SUMMARY_SYSTEM_PROMPT, prompt);
   const { text } = await generateText({
     model: openai("gpt-6-luna"),
     providerOptions: { openai: { reasoningEffort: "low" } },
     system: SUMMARY_SYSTEM_PROMPT,
-    prompt: threadPrompt(ticket).join("\n\n"),
+    prompt,
     abortSignal: AbortSignal.timeout(30_000),
   });
   return text.trim();
