@@ -2,7 +2,9 @@ import { Router } from "express";
 import { ticketIdParamsSchema, ticketListQuerySchema, UNCLASSIFIED, updateTicketSchema } from "core/schemas/tickets";
 import type { Prisma } from "../../generated/prisma/client";
 import { Role } from "../../generated/prisma/enums";
+import { isAiConfigured, summarizeTicket } from "../lib/ai";
 import { prisma } from "../lib/db";
+import { loadTicketContext } from "../lib/ticketContext";
 import { validate, validateParams, validateQuery } from "../lib/validate";
 import { repliesRouter } from "./replies";
 
@@ -145,4 +147,22 @@ ticketsRouter.patch("/:id", async (req, res) => {
     select: ticketDetailSelect,
   });
   res.json({ ticket: await withAssignee(ticket) });
+});
+
+// An AI summary of the ticket and its thread. Nothing is stored, so each request summarizes
+// the thread as it is now.
+ticketsRouter.post("/:id/summary", async (req, res) => {
+  const params = validateParams(ticketIdParamsSchema, req, res);
+  if (!params) return;
+
+  const ticket = await loadTicketContext(params.id);
+  if (!ticket) {
+    res.status(404).json({ error: "Ticket not found" });
+    return;
+  }
+  if (!isAiConfigured) {
+    res.status(503).json({ error: "AI isn't configured" });
+    return;
+  }
+  res.json({ summary: await summarizeTicket(ticket) });
 });

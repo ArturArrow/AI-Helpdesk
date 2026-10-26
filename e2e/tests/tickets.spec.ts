@@ -1174,3 +1174,66 @@ test.describe('PATCH /api/tickets/:id status and category', () => {
     await expectFilter(request, { status: 'resolved', category: 'refund_request' }, ticket.id, ticket.subject, true)
   })
 })
+
+// POST /api/tickets/:id/summary: no body, stores nothing. The test server has no OPENAI_API_KEY
+// (server/.env.test doesn't set it), so every request for an existing ticket ends at 503 and
+// OpenAI is never called. The ticket lookup (loadTicketContext) is shared with
+// POST /replies/polish, whose 404/503 order is covered in replies.spec.ts.
+test.describe('POST /api/tickets/:id/summary', () => {
+  const AI_OFF = { error: "AI isn't configured" }
+
+  test('401 without a session, for an existing and an invalid id', async ({ request }) => {
+    const ticket = await createTicketViaWebhook(request, 'summary-401')
+
+    for (const id of [String(ticket.id), 'abc']) {
+      const res = await request.post(`/api/tickets/${id}/summary`)
+      expect(res.status(), `id ${id}`).toBe(401)
+      expect(await res.json()).toEqual({ error: 'Unauthorized' })
+    }
+  })
+
+  for (const user of [AGENT, ADMIN]) {
+    test(`the ${user.name.toLowerCase()} gets 503 ${JSON.stringify(AI_OFF.error)} for an existing ticket`, async ({ request }) => {
+      const ticket = await createTicketViaWebhook(request, `summary-503-${user.name.toLowerCase()}`)
+      await signInViaApi(request, user)
+
+      const res = await request.post(`/api/tickets/${ticket.id}/summary`)
+      expect(res.status()).toBe(503)
+      expect(await res.json()).toEqual(AI_OFF)
+    })
+  }
+
+  test('leaves the ticket and its thread unchanged', async ({ request }) => {
+    const ticket = await createTicketViaWebhook(request, 'summary-unchanged')
+    await signInViaApi(request, AGENT)
+    const posted = await request.post(`/api/tickets/${ticket.id}/replies`, { data: { body: 'Already sent' } })
+    expect(posted.status()).toBe(201)
+    const before = await getTicket(request, ticket.id)
+    const repliesBefore = await (await request.get(`/api/tickets/${ticket.id}/replies`)).json()
+
+    const res = await request.post(`/api/tickets/${ticket.id}/summary`)
+    expect(res.status()).toBe(503)
+
+    expect(await getTicket(request, ticket.id)).toEqual(before)
+    const repliesAfter = await request.get(`/api/tickets/${ticket.id}/replies`)
+    expect(repliesAfter.status()).toBe(200)
+    expect(await repliesAfter.json()).toEqual(repliesBefore)
+    expect(repliesBefore.replies).toHaveLength(1)
+  })
+
+  for (const id of ['abc', '0', '-1', '1.5', '2147483648']) {
+    test(`id ${id} gets 400 ${JSON.stringify(TICKET_ID_ERROR)}`, async ({ request }) => {
+      await signInViaApi(request, AGENT)
+      const res = await request.post(`/api/tickets/${id}/summary`)
+      expect(res.status()).toBe(400)
+      expect(await res.json()).toEqual({ error: TICKET_ID_ERROR })
+    })
+  }
+
+  test('a valid but nonexistent id (2147483647, the int4 maximum) gets 404, not 503 (lookup before the AI check)', async ({ request }) => {
+    await signInViaApi(request, AGENT)
+    const res = await request.post('/api/tickets/2147483647/summary')
+    expect(res.status()).toBe(404)
+    expect(await res.json()).toEqual({ error: 'Ticket not found' })
+  })
+})

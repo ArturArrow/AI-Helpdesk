@@ -125,6 +125,21 @@ describe('TicketDetailPage', () => {
     }
   })
 
+  it('shows the Summarize button between the message and the replies, without requesting a summary', async () => {
+    mockTicketAndAgents(ticket)
+    const post = vi.spyOn(axios, 'post')
+    renderAt('/tickets/42')
+    const thread = await screen.findByRole('region', { name: 'Replies' })
+
+    const summarize = within(screen.getByRole('region', { name: 'Summary' })).getByRole('button', {
+      name: 'Summarize',
+    })
+    const body = screen.getByText(/please refund my order/)
+    expect(body.compareDocumentPosition(summarize) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(summarize.compareDocumentPosition(thread) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(post).not.toHaveBeenCalled()
+  })
+
   it('shows Unclassified for a ticket without a category', async () => {
     mockTicketAndAgents({ ...ticket, status: TicketStatus.resolved, category: null })
     renderAt('/tickets/42')
