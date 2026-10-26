@@ -101,8 +101,9 @@ describe('ReplyForm', () => {
 
     expect(post).toHaveBeenCalledExactlyOnceWith('/api/tickets/42/replies', { body: reply.body })
     await waitFor(() => expect(textarea()).toHaveValue(''))
-    // The cleared field is blank, so there is nothing to send until the next reply is typed.
+    // The cleared field is blank, so there is nothing to send or polish until the next reply is typed.
     expect(sendButton()).toBeDisabled()
+    expect(polishButton()).toBeDisabled()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
@@ -151,27 +152,47 @@ describe('ReplyForm', () => {
       expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     })
 
-    it('shows "Reply can\'t be empty" and sends nothing for an empty draft', async () => {
+    it('disables "Polish" while the draft is empty, and clicking it sends nothing', async () => {
       const user = userEvent.setup()
       const post = vi.spyOn(axios, 'post')
       renderWithQuery(<ReplyForm ticket={{ id: 42 }} />)
 
+      expect(polishButton()).toBeDisabled()
       await user.click(polishButton())
 
-      expect((await screen.findByRole('alert')).textContent).toBe("Reply can't be empty")
-      expect(textarea()).toHaveAttribute('aria-invalid', 'true')
+      // Blank is blocked by the disabled button, not reported as a validation error.
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      expect(textarea()).toHaveAttribute('aria-invalid', 'false')
       expect(post).not.toHaveBeenCalled()
     })
 
-    it('treats a whitespace-only draft as empty', async () => {
+    it('keeps "Polish" disabled for a whitespace-only draft until real text is typed', async () => {
       const user = userEvent.setup()
       const post = vi.spyOn(axios, 'post')
       renderWithQuery(<ReplyForm ticket={{ id: 42 }} />)
 
       await user.type(textarea(), '   \n  ')
+      expect(polishButton()).toBeDisabled()
       await user.click(polishButton())
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      expect(post).not.toHaveBeenCalled()
 
-      expect((await screen.findByRole('alert')).textContent).toBe("Reply can't be empty")
+      await user.type(textarea(), 'Hi')
+      expect(polishButton()).toBeEnabled()
+    })
+
+    it('disables "Polish" again when the text is deleted back to empty', async () => {
+      const user = userEvent.setup()
+      const post = vi.spyOn(axios, 'post')
+      renderWithQuery(<ReplyForm ticket={{ id: 42 }} />)
+
+      await user.type(textarea(), 'Hi')
+      expect(polishButton()).toBeEnabled()
+      await user.type(textarea(), '{Backspace}{Backspace}')
+
+      expect(textarea()).toHaveValue('')
+      expect(polishButton()).toBeDisabled()
+      await user.click(polishButton())
       expect(post).not.toHaveBeenCalled()
     })
 

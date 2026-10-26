@@ -22,7 +22,6 @@ function ReplyForm({ ticket }: { ticket: Pick<TicketDetailData, 'id'> }) {
     reset,
     getValues,
     setValue,
-    trigger,
     control,
     formState: { errors },
   } = useForm<CreateReplyInput>({
@@ -51,7 +50,7 @@ function ReplyForm({ ticket }: { ticket: Pick<TicketDetailData, 'id'> }) {
   })
 
   const isPending = sendReply.isPending || polishReply.isPending
-  // Sending a blank reply is blocked by disabling the button, not by a validation error.
+  // Sending or polishing a blank reply is blocked by disabling the buttons, not by a validation error.
   const isBlank = !useWatch({ control, name: 'body' }).trim()
 
   return (
@@ -97,11 +96,8 @@ function ReplyForm({ ticket }: { ticket: Pick<TicketDetailData, 'id'> }) {
         <Button
           type="button"
           variant="outline"
-          disabled={isPending}
-          onClick={async () => {
-            // A blank draft shows the form's own "Reply can't be empty" instead of calling the API.
-            if (await trigger('body')) polishReply.mutate(getValues('body'))
-          }}
+          disabled={isPending || isBlank}
+          onClick={() => polishReply.mutate(getValues('body'))}
         >
           {polishReply.isPending ? <Loader2Icon className="animate-spin" /> : <SparklesIcon />}
           Polish
