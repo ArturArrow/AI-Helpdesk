@@ -78,11 +78,12 @@ webhookRouter.post("/inbound-email", async (req, res) => {
 
     const ticket = await prisma.ticket.create({
       data: { ...fields, status: TicketStatus.open },
-      select: { id: true },
+      // The stored subject, body and sender go straight to classification, without a second read.
+      select: { id: true, subject: true, body: true, senderName: true },
     });
-    res.status(201).json({ ticket });
+    res.status(201).json({ ticket: { id: ticket.id } });
     // In the background: the provider shouldn't wait on the model, or it may time out and redeliver.
-    void classifyNewTicket(ticket.id);
+    void classifyNewTicket(ticket);
   } catch (error) {
     // A concurrent redelivery won the race on the unique messageId.
     if (
