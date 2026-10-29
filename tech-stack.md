@@ -29,6 +29,10 @@ Versions reflect the installed dependencies as of 2026-09-17. Sections marked **
 
 - PostgreSQL
 
+## Background jobs
+
+- pg-boss 12: a job queue stored in PostgreSQL (its own `pgboss` schema), used for AI classification of new tickets
+
 ## ORM
 
 - Prisma 7 with the `@prisma/adapter-pg` driver adapter (`pg` 8)

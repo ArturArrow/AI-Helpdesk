@@ -1,9 +1,11 @@
 import cors from "cors";
 import express, { type ErrorRequestHandler } from "express";
 import { toNodeHandler } from "better-auth/node";
+import { isAiConfigured } from "./lib/ai";
 import { auth, CLIENT_IP_HEADER } from "./lib/auth";
 import { prisma } from "./lib/db";
 import { CLIENT_URL } from "./lib/env";
+import { boss, startQueue } from "./lib/queue";
 import { requireAdmin } from "./middleware/requireAdmin";
 import { requireAuth } from "./middleware/requireAuth";
 import { requireWebhookSecret } from "./middleware/requireWebhookSecret";
@@ -79,5 +81,23 @@ app.listen(port, async () => {
     console.log("Connected to the helpdesk database");
   } catch (error) {
     console.error("Failed to connect to the database:", error);
+  }
+
+  // The only jobs are AI classification, so without a key pg-boss isn't started at all.
+  if (!isAiConfigured) return;
+  try {
+    await startQueue();
+    console.log("Background job queue started");
+  } catch (error) {
+    console.error("Failed to start the background job queue:", error);
+    return;
+  }
+
+  // Lets a running job finish before the process exits.
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.once(signal, async () => {
+      await boss.stop();
+      process.exit(0);
+    });
   }
 });
