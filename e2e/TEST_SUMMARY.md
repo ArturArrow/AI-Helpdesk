@@ -2,9 +2,9 @@
 
 ## Last run
 
-- **Date:** 2026-10-26
+- **Date:** 2026-10-29
 - **Discovered (`--list`):** 287 tests in 8 files.
-- **Result:** 287 passed, 0 failed, 1.2m (chromium).
+- **Result:** 287 passed, 0 failed, 51.7s (chromium). Run after moving ticket classification onto pg-boss; the test env has no `OPENAI_API_KEY`, so the queue isn't started.
 
 ## tests/login.spec.ts
 

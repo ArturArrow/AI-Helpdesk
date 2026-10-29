@@ -2,8 +2,9 @@ import { Router } from "express";
 import { inboundEmailSchema } from "core/schemas/tickets";
 import { Prisma } from "../../generated/prisma/client";
 import { ReplySender, TicketStatus } from "../../generated/prisma/enums";
-import { classifyNewTicket } from "../lib/classifyTicket";
+import { isAiConfigured } from "../lib/ai";
 import { prisma } from "../lib/db";
+import { boss, CLASSIFY_TICKET_QUEUE } from "../lib/queue";
 import { validate } from "../lib/validate";
 
 export const webhookRouter = Router();
@@ -81,9 +82,16 @@ webhookRouter.post("/inbound-email", async (req, res) => {
       // The stored subject, body and sender go straight to classification, without a second read.
       select: { id: true, subject: true, body: true, senderName: true },
     });
+    // Classified by a background job: the provider shouldn't wait on the model, or it may time out
+    // and redeliver. The ticket is already stored, so a queue failure only leaves it unclassified.
+    if (isAiConfigured) {
+      try {
+        await boss.send(CLASSIFY_TICKET_QUEUE, ticket);
+      } catch (error) {
+        console.error(`[queue] couldn't queue classification of ticket ${ticket.id}:`, error);
+      }
+    }
     res.status(201).json({ ticket: { id: ticket.id } });
-    // In the background: the provider shouldn't wait on the model, or it may time out and redeliver.
-    void classifyNewTicket(ticket);
   } catch (error) {
     // A concurrent redelivery won the race on the unique messageId.
     if (
