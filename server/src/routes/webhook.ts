@@ -2,6 +2,7 @@ import { Router } from "express";
 import { inboundEmailSchema } from "core/schemas/tickets";
 import { Prisma } from "../../generated/prisma/client";
 import { ReplySender, TicketStatus } from "../../generated/prisma/enums";
+import { classifyNewTicket } from "../lib/classifyTicket";
 import { prisma } from "../lib/db";
 import { validate } from "../lib/validate";
 
@@ -80,6 +81,8 @@ webhookRouter.post("/inbound-email", async (req, res) => {
       select: { id: true },
     });
     res.status(201).json({ ticket });
+    // In the background: the provider shouldn't wait on the model, or it may time out and redeliver.
+    void classifyNewTicket(ticket.id);
   } catch (error) {
     // A concurrent redelivery won the race on the unique messageId.
     if (
