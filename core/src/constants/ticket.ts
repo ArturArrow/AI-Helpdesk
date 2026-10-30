@@ -26,10 +26,19 @@ export interface TicketDetailData extends Ticket {
   assignedTo: Assignee | null;
 }
 
+export interface TicketsOnDay {
+  // YYYY-MM-DD in the requested time zone.
+  date: string;
+  count: number;
+}
+
 // GET /api/tickets/stats, for the dashboard. averageResolutionMs is null until a ticket is resolved.
+// ticketsPerDay has every day of the period, oldest first, including days with no tickets; for
+// all time it starts at the first ticket's day.
 export interface TicketStats {
   total: number;
   open: number;
   resolvedByAi: number;
   averageResolutionMs: number | null;
+  ticketsPerDay: TicketsOnDay[];
 }

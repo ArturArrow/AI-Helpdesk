@@ -4,6 +4,7 @@ import type { TicketStats } from 'core/constants/ticket'
 import { statsPeriodLabels, statsPeriods, ticketStatsQuerySchema, type StatsPeriod } from 'core/schemas/tickets'
 import type { ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router'
+import TicketsPerDayChart from '@/components/TicketsPerDayChart.tsx'
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card.tsx'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select.tsx'
 import { Skeleton } from '@/components/ui/skeleton.tsx'
@@ -44,6 +45,8 @@ const statLabels = ['Total tickets', 'Open tickets (now)', 'Resolved by AI', 'Re
 
 const periodItems = statsPeriods.map((period) => ({ value: period, label: statsPeriodLabels[period] }))
 const periodSchema = ticketStatsQuerySchema.shape.period
+// Days are counted in the viewer's own time zone.
+const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
 
 // The period lives in the URL (/?period=30d), so a view can be linked to; an invalid value
 // falls back to all time, which is left out of the URL.
@@ -65,7 +68,7 @@ function DashboardPage() {
 
   const { data: stats, error } = useQuery({
     queryKey: ['ticket-stats', period],
-    queryFn: async () => (await axios.get<TicketStats>('/api/tickets/stats', { params: { period } })).data,
+    queryFn: async () => (await axios.get<TicketStats>('/api/tickets/stats', { params: { period, tz: timeZone } })).data,
   })
 
   return (
@@ -95,23 +98,26 @@ function DashboardPage() {
           Couldn't load the dashboard: {errorMessage(error)}
         </p>
       ) : (
-        <div aria-busy={!stats} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          {!stats ? (
-            statLabels.map((label) => (
-              <StatCard key={label} label={label}>
-                <Skeleton className="h-9 w-16" />
-              </StatCard>
-            ))
-          ) : (
-            <>
-              <StatCard label="Total tickets" to="/tickets">{stats.total}</StatCard>
-              <StatCard label="Open tickets (now)" to="/tickets?status=open">{stats.open}</StatCard>
-              <StatCard label="Resolved by AI">{stats.resolvedByAi}</StatCard>
-              <StatCard label="Resolved by AI (%)">{formatPercent(stats.resolvedByAi, stats.total)}</StatCard>
-              <StatCard label="Avg. resolution time">{formatDuration(stats.averageResolutionMs)}</StatCard>
-            </>
-          )}
-        </div>
+        <>
+          <div aria-busy={!stats} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            {!stats ? (
+              statLabels.map((label) => (
+                <StatCard key={label} label={label}>
+                  <Skeleton className="h-9 w-16" />
+                </StatCard>
+              ))
+            ) : (
+              <>
+                <StatCard label="Total tickets" to="/tickets">{stats.total}</StatCard>
+                <StatCard label="Open tickets (now)" to="/tickets?status=open">{stats.open}</StatCard>
+                <StatCard label="Resolved by AI">{stats.resolvedByAi}</StatCard>
+                <StatCard label="Resolved by AI (%)">{formatPercent(stats.resolvedByAi, stats.total)}</StatCard>
+                <StatCard label="Avg. resolution time">{formatDuration(stats.averageResolutionMs)}</StatCard>
+              </>
+            )}
+          </div>
+          <TicketsPerDayChart days={stats?.ticketsPerDay} />
+        </>
       )}
     </div>
   )

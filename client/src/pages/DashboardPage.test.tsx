@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import axios, { AxiosError } from 'axios'
 import type { TicketStats } from 'core/constants/ticket'
@@ -20,7 +20,9 @@ function mockStats(stats: TicketStats) {
   return vi.spyOn(axios, 'get').mockResolvedValue({ data: stats })
 }
 
-const stats: TicketStats = { total: 42, open: 17, resolvedByAi: 9, averageResolutionMs: HOUR }
+const stats: TicketStats = { total: 42, open: 17, resolvedByAi: 9, averageResolutionMs: HOUR, ticketsPerDay: [] }
+// The page sends the viewer's time zone, resolved the same way.
+const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
 
 function periodSelect() {
   return screen.getByRole('combobox', { name: 'Period' })
@@ -54,11 +56,11 @@ describe('DashboardPage', () => {
   })
 
   it('shows the five stats from GET /api/tickets/stats', async () => {
-    const get = mockStats({ total: 42, open: 17, resolvedByAi: 9, averageResolutionMs: 3 * HOUR + 20 * MINUTE })
+    const get = mockStats({ total: 42, open: 17, resolvedByAi: 9, averageResolutionMs: 3 * HOUR + 20 * MINUTE, ticketsPerDay: [] })
     renderWithRouter(<DashboardPage />)
 
     expect(await screen.findByText('42')).toBeInTheDocument()
-    expect(get).toHaveBeenCalledWith('/api/tickets/stats', { params: { period: 'all' } })
+    expect(get).toHaveBeenCalledWith('/api/tickets/stats', { params: { period: 'all', tz } })
     expect(document.querySelector('[aria-busy]')).toHaveAttribute('aria-busy', 'false')
     for (const label of labels) expect(screen.getByText(label)).toBeInTheDocument()
     expect(screen.getByText('17')).toBeInTheDocument()
@@ -69,7 +71,7 @@ describe('DashboardPage', () => {
   })
 
   it('links the total and open cards to the ticket list', async () => {
-    mockStats({ total: 42, open: 17, resolvedByAi: 9, averageResolutionMs: HOUR })
+    mockStats({ total: 42, open: 17, resolvedByAi: 9, averageResolutionMs: HOUR, ticketsPerDay: [] })
     renderWithRouter(<DashboardPage />)
 
     expect(await screen.findByRole('link', { name: 'Total tickets' })).toHaveAttribute('href', '/tickets')
@@ -82,14 +84,14 @@ describe('DashboardPage', () => {
     { resolvedByAi: 1, total: 8, expected: '13%' },
     { resolvedByAi: 1, total: 3, expected: '33%' },
   ])('rounds $resolvedByAi of $total to $expected', async ({ resolvedByAi, total, expected }) => {
-    mockStats({ total, open: 0, resolvedByAi, averageResolutionMs: HOUR })
+    mockStats({ total, open: 0, resolvedByAi, averageResolutionMs: HOUR, ticketsPerDay: [] })
     renderWithRouter(<DashboardPage />)
 
     expect(await screen.findByText(expected)).toBeInTheDocument()
   })
 
   it('shows "—" for the percentage with no tickets and for a null average', async () => {
-    mockStats({ total: 0, open: 0, resolvedByAi: 0, averageResolutionMs: null })
+    mockStats({ total: 0, open: 0, resolvedByAi: 0, averageResolutionMs: null, ticketsPerDay: [] })
     renderWithRouter(<DashboardPage />)
 
     expect(await screen.findAllByText('—')).toHaveLength(2)
@@ -104,10 +106,41 @@ describe('DashboardPage', () => {
     { ms: 2 * HOUR, expected: '2h 0m' },
     { ms: 2 * DAY + 4 * HOUR + 59 * MINUTE, expected: '2d 4h' },
   ])('formats an average of $ms ms as $expected', async ({ ms, expected }) => {
-    mockStats({ total: 10, open: 5, resolvedByAi: 1, averageResolutionMs: ms })
+    mockStats({ total: 10, open: 5, resolvedByAi: 1, averageResolutionMs: ms, ticketsPerDay: [] })
     renderWithRouter(<DashboardPage />)
 
     expect(await screen.findByText(expected)).toBeInTheDocument()
+  })
+
+  it('shows the chart loading with the stats, then the days from the response', async () => {
+    const get = mockStats({
+      ...stats,
+      ticketsPerDay: [
+        { date: '2026-03-01', count: 4 },
+        { date: '2026-03-02', count: 0 },
+      ],
+    })
+    renderWithRouter(<DashboardPage />)
+
+    expect(screen.getByText('Tickets per day')).toBeInTheDocument()
+    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+
+    const table = await screen.findByRole('table', { name: 'Tickets per day' })
+    expect(get).toHaveBeenCalledWith('/api/tickets/stats', { params: { period: 'all', tz } })
+    const long: Intl.DateTimeFormatOptions = { year: 'numeric', month: 'long', day: 'numeric' }
+    expect(within(table).getAllByRole('row').slice(1).map((row) => row.textContent)).toEqual([
+      `${new Date(2026, 2, 1).toLocaleDateString(undefined, long)}4`,
+      `${new Date(2026, 2, 2).toLocaleDateString(undefined, long)}0`,
+    ])
+    expect(screen.getAllByTestId('bar')).toHaveLength(2)
+  })
+
+  it('shows "No tickets yet." in the chart when the response has no days', async () => {
+    mockStats(stats)
+    renderWithRouter(<DashboardPage />)
+
+    expect(await screen.findByText('No tickets yet.')).toBeInTheDocument()
+    expect(screen.queryByRole('table')).not.toBeInTheDocument()
   })
 
   it('shows the HTTP status when the request fails', async () => {
@@ -117,6 +150,7 @@ describe('DashboardPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't load the dashboard: Request failed (500)")
     expect(screen.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeInTheDocument()
     expect(screen.queryByText('Total tickets')).not.toBeInTheDocument()
+    expect(screen.queryByText('Tickets per day')).not.toBeInTheDocument()
     expect(document.querySelector('[aria-busy]')).not.toBeInTheDocument()
   })
 
@@ -134,7 +168,7 @@ describe('DashboardPage', () => {
       await screen.findByText('42')
 
       expect(get).toHaveBeenCalledTimes(1)
-      expect(get).toHaveBeenCalledWith('/api/tickets/stats', { params: { period: 'all' } })
+      expect(get).toHaveBeenCalledWith('/api/tickets/stats', { params: { period: 'all', tz } })
       expect(periodSelect()).toHaveTextContent('All time')
     })
 
@@ -155,7 +189,7 @@ describe('DashboardPage', () => {
       await screen.findByText('42')
 
       expect(get).toHaveBeenCalledTimes(1)
-      expect(get).toHaveBeenCalledWith('/api/tickets/stats', { params: { period: '7d' } })
+      expect(get).toHaveBeenCalledWith('/api/tickets/stats', { params: { period: '7d', tz } })
       expect(periodSelect()).toHaveTextContent('Last 7 days')
     })
 
@@ -165,7 +199,7 @@ describe('DashboardPage', () => {
       await screen.findByText('42')
 
       expect(get).toHaveBeenCalledTimes(1)
-      expect(get).toHaveBeenCalledWith('/api/tickets/stats', { params: { period: 'all' } })
+      expect(get).toHaveBeenCalledWith('/api/tickets/stats', { params: { period: 'all', tz } })
       expect(periodSelect()).toHaveTextContent('All time')
     })
 
@@ -178,7 +212,7 @@ describe('DashboardPage', () => {
       await choose(user, periodSelect(), 'Last 30 days')
 
       await waitFor(() =>
-        expect(get).toHaveBeenLastCalledWith('/api/tickets/stats', { params: { period: '30d' } }),
+        expect(get).toHaveBeenLastCalledWith('/api/tickets/stats', { params: { period: '30d', tz } }),
       )
       expect(periodSelect()).toHaveTextContent('Last 30 days')
       expect(urlSearch()).toBe('?period=30d')
@@ -195,7 +229,7 @@ describe('DashboardPage', () => {
       await choose(user, periodSelect(), 'All time')
 
       await waitFor(() =>
-        expect(get).toHaveBeenLastCalledWith('/api/tickets/stats', { params: { period: 'all' } }),
+        expect(get).toHaveBeenLastCalledWith('/api/tickets/stats', { params: { period: 'all', tz } }),
       )
       expect(periodSelect()).toHaveTextContent('All time')
       expect(urlSearch()).toBe('')

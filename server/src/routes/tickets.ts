@@ -110,23 +110,35 @@ ticketsRouter.get("/assignees", async (_req, res) => {
 
 const FINISHED_STATUSES: TicketStatus[] = [TicketStatus.resolved, TicketStatus.closed];
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 // The dashboard's numbers, for any signed-in user. Total counts every ticket, including those the
 // AI is still handling. A ticket counts as resolved by the AI while it's finished and has an AI
-// reply. The period limits total, resolvedByAi and the average to tickets created in it, so the
-// AI share compares like with like; open is always the backlog now. Declared before /:id, like
-// /assignees.
+// reply. The period limits total, resolvedByAi, the average and the per-day counts to tickets
+// created in it, so the AI share compares like with like and the days add up to the total; open
+// is always the backlog now. Declared before /:id, like /assignees.
+//
+// createdAt is a UTC timestamp without a time zone, and the database session's zone may be
+// anything, so the raw queries convert explicitly and dates cross into JS only as UTC text.
 ticketsRouter.get("/stats", async (req, res) => {
   const query = validateQuery(ticketStatsQuerySchema, req, res);
   if (!query) return;
-  const { period } = query;
+  const { period, tz } = query;
 
-  const since = period === "all" ? undefined : new Date(Date.now() - statsPeriodDays[period] * DAY_MS);
-  const created = since ? { createdAt: { gte: since } } : {};
+  // Midnight in tz, (days - 1) days ago.
+  const since =
+    period === "all"
+      ? null
+      : (
+          await prisma.$queryRaw<[{ since: string }]>`
+            SELECT to_char(
+              (date_trunc('day', now() AT TIME ZONE ${tz}) - make_interval(days => ${statsPeriodDays[period] - 1}))
+                AT TIME ZONE ${tz} AT TIME ZONE 'UTC',
+              'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS since`
+        )[0].since;
+  const sinceUtc = Prisma.sql`(${since}::timestamptz AT TIME ZONE 'UTC')`;
+  const created = since ? { createdAt: { gte: new Date(since) } } : {};
   const finished = { ...created, status: { in: FINISHED_STATUSES } };
   // Prisma's aggregate can't average a difference of two columns, hence the raw query.
-  const [total, open, resolvedByAi, [{ averageResolutionMs }]] = await prisma.$transaction([
+  const [total, open, resolvedByAi, [{ averageResolutionMs }], ticketsPerDay] = await prisma.$transaction([
     prisma.ticket.count({ where: created }),
     prisma.ticket.count({ where: { status: TicketStatus.open } }),
     prisma.ticket.count({ where: { ...finished, replies: { some: { sender: ReplySender.ai } } } }),
@@ -135,9 +147,24 @@ ticketsRouter.get("/stats", async (req, res) => {
       FROM "ticket"
       WHERE "status" IN (${Prisma.join(FINISHED_STATUSES.map((status) => Prisma.sql`${status}::"TicketStatus"`))})
         AND "resolvedAt" IS NOT NULL
-        ${since ? Prisma.sql`AND "createdAt" >= ${since}` : Prisma.empty}`,
+        ${since ? Prisma.sql`AND "createdAt" >= ${sinceUtc}` : Prisma.empty}`,
+    // Every day from the start of the period (or the first ticket) to today, zeros included.
+    prisma.$queryRaw<TicketStats["ticketsPerDay"]>`
+      WITH bounds AS (
+        SELECT COALESCE(${sinceUtc}, MIN("createdAt")) AS start FROM "ticket"
+      ), days AS (
+        SELECT generate_series(
+          date_trunc('day', start AT TIME ZONE 'UTC' AT TIME ZONE ${tz}),
+          date_trunc('day', now() AT TIME ZONE ${tz}),
+          interval '1 day')::date AS day
+        FROM bounds WHERE start IS NOT NULL
+      )
+      SELECT to_char(days.day, 'YYYY-MM-DD') AS date, COUNT(t.id)::int AS count
+      FROM days LEFT JOIN "ticket" t ON (t."createdAt" AT TIME ZONE 'UTC' AT TIME ZONE ${tz})::date = days.day
+      GROUP BY days.day
+      ORDER BY days.day`,
   ]);
-  const stats: TicketStats = { total, open, resolvedByAi, averageResolutionMs };
+  const stats: TicketStats = { total, open, resolvedByAi, averageResolutionMs, ticketsPerDay };
   res.json(stats);
 });
 

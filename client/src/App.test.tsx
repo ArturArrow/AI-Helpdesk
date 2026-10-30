@@ -32,7 +32,9 @@ const ticket = {
   assignedTo: null,
 }
 
-const stats = { total: 3, open: 2, resolvedByAi: 1, averageResolutionMs: null }
+const stats = { total: 3, open: 2, resolvedByAi: 1, averageResolutionMs: null, ticketsPerDay: [] }
+// The dashboard sends the viewer's time zone, resolved the same way.
+const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
 
 async function expectLoginPage() {
   expect(await screen.findByRole('button', { name: 'Sign in' })).toBeInTheDocument()
@@ -66,7 +68,7 @@ describe('App routing', () => {
     renderWithRouter(<App />, '/no-such-page')
 
     expect(await screen.findByRole('heading', { name: 'Dashboard', level: 1 })).toBeInTheDocument()
-    expect(get).toHaveBeenCalledWith('/api/tickets/stats', { params: { period: 'all' } })
+    expect(get).toHaveBeenCalledWith('/api/tickets/stats', { params: { period: 'all', tz } })
     expect(screen.queryByRole('button', { name: 'Sign in' })).not.toBeInTheDocument()
   })
 
@@ -80,7 +82,7 @@ describe('App routing', () => {
     expect(await screen.findByRole('heading', { name: 'Dashboard', level: 1 })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Users' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Users' })).not.toBeInTheDocument()
-    expect(get).toHaveBeenCalledWith('/api/tickets/stats', { params: { period: 'all' } })
+    expect(get).toHaveBeenCalledWith('/api/tickets/stats', { params: { period: 'all', tz } })
     expect(get).not.toHaveBeenCalledWith('/api/users')
   })
 

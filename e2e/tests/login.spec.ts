@@ -5,7 +5,7 @@ test.describe('login: happy path', () => {
   test('admin signs in, lands on / and sees the navbar with the Users link', async ({ page }) => {
     await signInViaUi(page, ADMIN)
 
-    await expect(page.getByRole('heading', { name: `Welcome, ${ADMIN.name}` })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible()
     const nav = page.getByRole('navigation')
     await expect(nav.getByRole('link', { name: 'Helpdesk' })).toBeVisible()
     await expect(nav.getByRole('link', { name: 'Users' })).toBeVisible()
@@ -16,7 +16,8 @@ test.describe('login: happy path', () => {
   test('email is matched case-insensitively', async ({ page }) => {
     await signInViaUi(page, { ...ADMIN, email: ADMIN.email.toUpperCase() })
 
-    await expect(page.getByRole('heading', { name: `Welcome, ${ADMIN.name}` })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible()
+    await expect(page.getByRole('navigation').getByText(ADMIN.name, { exact: true })).toBeVisible()
   })
 })
 
