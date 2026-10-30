@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 import { ADMIN, AGENT, signInViaApi, type Credentials } from '../fixtures/auth.js'
-import { createTicketViaWebhook } from '../fixtures/tickets.js'
+import { addAiReplyInDb, createTicketViaWebhook } from '../fixtures/tickets.js'
 import { createUserViaApi, deleteUserViaApi } from '../fixtures/users.js'
 
 // GET and POST /api/tickets/:id/replies, at the API only (the thread and the form are covered
@@ -217,6 +217,28 @@ test.describe('GET /api/tickets/:id/replies', () => {
     for (const reply of replies) expect(Object.keys(reply).sort()).toEqual(REPLY_KEYS)
     const times = replies.map((r) => Date.parse(r.createdAt))
     expect(times).toEqual([...times].sort((a, b) => a - b))
+  })
+
+  // ai replies come only from the AI pipeline (needs OPENAI_API_KEY), so this one is written to the DB.
+  test('an ai reply is returned with sender ai, author null and bodyHTML null, in order after an agent reply', async ({ request }) => {
+    const ticket = await createTicketViaWebhook(request, 'reply-ai')
+    await signInViaApi(request, AGENT)
+    const agentReply = await postReply(request, ticket.id, 'Agent reply first')
+    addAiReplyInDb(ticket.id, 'Answered from the knowledge base.')
+
+    const replies = await listReplies(request, ticket.id)
+    expect(replies).toEqual([
+      agentReply,
+      {
+        id: expect.any(Number),
+        body: 'Answered from the knowledge base.',
+        bodyHTML: null,
+        sender: 'ai',
+        createdAt: expect.any(String),
+        author: null,
+      },
+    ])
+    expect(Number.isNaN(Date.parse(replies[1].createdAt))).toBe(false)
   })
 
   test("returns only that ticket's replies", async ({ request }) => {

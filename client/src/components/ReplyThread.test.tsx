@@ -88,6 +88,28 @@ describe('ReplyThread', () => {
     expect(within(item).getByText(replies[0].body)).toBeInTheDocument()
   })
 
+  it('shows an AI reply with the AI label and no author', async () => {
+    const aiReply: Reply = {
+      id: 4,
+      body: 'You can request a refund from the Orders page.',
+      bodyHTML: null,
+      sender: ReplySender.ai,
+      createdAt: '2026-04-04T12:00:00.000Z',
+      author: null,
+    }
+    mockGet().mockResolvedValue({ data: { replies: [aiReply] } })
+    renderWithQuery(<ReplyThread ticket={{ id: 42 }} />)
+
+    const item = within(await screen.findByRole('list')).getByRole('listitem')
+    expect(within(item).getByText('AI')).toBeInTheDocument()
+    expect(within(item).queryByText('Agent')).not.toBeInTheDocument()
+    expect(within(item).queryByText('Customer')).not.toBeInTheDocument()
+    expect(within(item).getByText(new Date(aiReply.createdAt).toLocaleString())).toBeInTheDocument()
+    expect(within(item).getByText(aiReply.body)).toBeInTheDocument()
+    // The label, separator, date and body, and nothing else: no author name.
+    expect(item.textContent).toBe(`AI·${new Date(aiReply.createdAt).toLocaleString()}${aiReply.body}`)
+  })
+
   it('says there are no replies when the list is empty', async () => {
     mockGet().mockResolvedValue({ data: { replies: [] } })
     renderWithQuery(<ReplyThread ticket={{ id: 42 }} />)

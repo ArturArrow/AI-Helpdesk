@@ -1,3 +1,5 @@
+import { execSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { expect, type APIRequestContext } from '@playwright/test'
 import { uniqueSuffix } from './users.js'
 import { inboundSecret } from './webhook.js'
@@ -48,4 +50,25 @@ export async function updateTicketViaApi(request: APIRequestContext, ticketId: n
   const res = await request.patch(`/api/tickets/${ticketId}`, { data })
   expect(res.status(), `update ticket ${ticketId} with ${JSON.stringify(data)}`).toBe(200)
   return (await res.json()).ticket
+}
+
+// Runs e2e/write-ticket.ts like global-setup's steps: from server/, with only .env.test loaded.
+function writeTicketInDb(env: Record<string, string>) {
+  execSync('bun --env-file=.env.test run ../e2e/write-ticket.ts', {
+    cwd: fileURLToPath(new URL('../../server', import.meta.url)),
+    stdio: 'inherit',
+    env: { ...process.env, ...env },
+  })
+}
+
+// Sets a ticket's status directly in helpdesk_test. For `new` and `processing`, which only the
+// AI pipeline sets (the API accepts only open, resolved, closed, and E2E runs without the key).
+export function setTicketStatusInDb(ticketId: number, status: string) {
+  writeTicketInDb({ E2E_TICKET_ID: String(ticketId), E2E_TICKET_STATUS: status })
+}
+
+// Adds a `sender: ai` reply (no author, no bodyHTML) to a ticket directly in helpdesk_test, as the
+// AI pipeline does when it resolves a ticket.
+export function addAiReplyInDb(ticketId: number, body: string) {
+  writeTicketInDb({ E2E_TICKET_ID: String(ticketId), E2E_AI_REPLY_BODY: body })
 }

@@ -83,7 +83,7 @@ app.listen(port, async () => {
     console.error("Failed to connect to the database:", error);
   }
 
-  // The only jobs are AI classification, so without a key pg-boss isn't started at all.
+  // The only jobs are AI classification and auto-resolving, so without a key pg-boss isn't started at all.
   if (!isAiConfigured) return;
   try {
     await startQueue();

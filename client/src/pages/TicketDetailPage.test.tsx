@@ -428,6 +428,37 @@ describe('TicketDetailPage', () => {
       expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     })
 
+    it('shows Processing for a ticket the AI is handling, without offering it as an option', async () => {
+      const user = userEvent.setup()
+      await renderLoaded({ ...ticket, status: TicketStatus.processing })
+
+      expect(statusSelect()).toHaveTextContent('Processing')
+      await user.click(statusSelect())
+      const statuses = await screen.findByRole('listbox')
+      expect(within(statuses).getAllByRole('option').map((o) => o.textContent)).toEqual(['Open', 'Resolved', 'Closed'])
+    })
+
+    it('shows New for a ticket the AI has not picked up yet', async () => {
+      await renderLoaded({ ...ticket, status: TicketStatus.new })
+
+      expect(statusSelect()).toHaveTextContent('New')
+    })
+
+    it('sends status: open when Open is chosen for a processing ticket', async () => {
+      const user = userEvent.setup()
+      const patch = vi
+        .spyOn(axios, 'patch')
+        .mockResolvedValue({ data: { ticket: { ...ticket, status: TicketStatus.open } } })
+      await renderLoaded({ ...ticket, status: TicketStatus.processing })
+
+      await choose(user, statusSelect(), 'Open')
+
+      expect(patch).toHaveBeenCalledExactlyOnceWith('/api/tickets/42', { status: TicketStatus.open })
+      await waitFor(() => expect(statusSelect()).toHaveTextContent('Open'))
+      expect(statusSelect()).not.toHaveTextContent('Processing')
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
     it('sends only the new category and shows it in the trigger', async () => {
       const user = userEvent.setup()
       const patch = vi

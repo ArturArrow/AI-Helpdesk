@@ -1,5 +1,5 @@
 import { categoryLabels, TicketCategory } from 'core/constants/ticketCategory'
-import { statusLabels, TicketStatus } from 'core/constants/ticketStatus'
+import { statusLabels, VISIBLE_TICKET_STATUSES, type VisibleTicketStatus } from 'core/constants/ticketStatus'
 import { UNCLASSIFIED, type TicketCategoryFilter } from 'core/schemas/tickets'
 import { Search } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/select.tsx'
 
 export type TicketFilterValues = {
-  status?: TicketStatus
+  status?: VisibleTicketStatus
   category?: TicketCategoryFilter
   q?: string
 }
@@ -24,10 +24,11 @@ type TicketFiltersProps = {
   onChange: (filters: TicketFilterValues) => void
 }
 
-// A null item is "all", so each select can be cleared from its own list.
-const statusItems: { value: TicketStatus | null; label: string }[] = [
+// A null item is "all", so each select can be cleared from its own list. Tickets the AI is still
+// handling aren't listed, so their statuses aren't offered.
+const statusItems: { value: VisibleTicketStatus | null; label: string }[] = [
   { value: null, label: 'All statuses' },
-  ...Object.values(TicketStatus).map((status) => ({ value: status, label: statusLabels[status] })),
+  ...VISIBLE_TICKET_STATUSES.map((status) => ({ value: status, label: statusLabels[status] })),
 ]
 
 const categoryItems: { value: TicketCategoryFilter | null; label: string }[] = [
@@ -48,7 +49,7 @@ function TicketFilters({ filters, onChange }: TicketFiltersProps) {
         value={filters.q}
         onSearch={(q) => onChange({ ...filters, q })}
       />
-      <Select<TicketStatus>
+      <Select<VisibleTicketStatus>
         items={statusItems}
         value={filters.status ?? null}
         onValueChange={(status) => onChange({ ...filters, status: status ?? undefined })}

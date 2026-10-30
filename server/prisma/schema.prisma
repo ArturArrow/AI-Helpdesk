@@ -85,7 +85,11 @@ model Verification {
   @@map("verification")
 }
 
+// new: just arrived, waiting for the AI. processing: the AI is trying to resolve it from the
+// knowledge base. Both are hidden from the ticket list; the AI then resolves it or leaves it open.
 enum TicketStatus {
+  new
+  processing
   open
   resolved
   closed
@@ -125,6 +129,7 @@ model Ticket {
 enum ReplySender {
   agent
   customer
+  ai
 }
 
 model Reply {
@@ -135,7 +140,8 @@ model Reply {
   // HTML version of a customer's email, when the sender included one. Null for agent replies,
   // which are written as plain text.
   bodyHTML  String?
-  // agent: written in the UI. customer: an email in the ticket's thread (Phase 6).
+  // agent: written in the UI. customer: an email in the ticket's thread (Phase 6). ai: the answer
+  // the AI resolved a new ticket with, from the knowledge base.
   sender    ReplySender
   // The Message-ID of a customer's email: dedupes redelivered webhooks and threads later
   // replies to it. Null for agent replies.
