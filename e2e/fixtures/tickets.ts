@@ -14,11 +14,19 @@ export type CreatedTicket = {
 // Creates a ticket through the inbound-email webhook (the only way to create one so far).
 // Subject and sender are unique per call, so tests can find their own rows among other specs'.
 // `overrides` sets any of these fields exactly, for tests that sort or search on them. No bodyHTML
-// is sent unless an override sets one, so the ticket's bodyHTML is null by default.
+// is sent unless an override sets one, so the ticket's bodyHTML is null by default. A `messageId`
+// override lets a later email thread onto the ticket.
 export async function createTicketViaWebhook(
   request: APIRequestContext,
   label = 'ticket',
-  overrides: { subject?: string; senderName?: string; senderEmail?: string; body?: string; bodyHTML?: string } = {},
+  overrides: {
+    subject?: string
+    senderName?: string
+    senderEmail?: string
+    body?: string
+    bodyHTML?: string
+    messageId?: string
+  } = {},
 ): Promise<CreatedTicket> {
   const suffix = uniqueSuffix()
   const data = {
@@ -65,6 +73,28 @@ function writeTicketInDb(env: Record<string, string>) {
 // AI pipeline sets (the API accepts only open, resolved, closed, and E2E runs without the key).
 export function setTicketStatusInDb(ticketId: number, status: string) {
   writeTicketInDb({ E2E_TICKET_ID: String(ticketId), E2E_TICKET_STATUS: status })
+}
+
+// Writes any of status, createdAt and resolvedAt (null clears it) directly in helpdesk_test, for
+// tests that need known resolution times. Fields left out are unchanged; it doesn't apply the
+// API's resolvedAt rules.
+export function setTicketInDb(
+  ticketId: number,
+  fields: { status?: string; createdAt?: Date; resolvedAt?: Date | null },
+) {
+  const env: Record<string, string> = { E2E_TICKET_ID: String(ticketId) }
+  if (fields.status) env.E2E_TICKET_STATUS = fields.status
+  if (fields.createdAt) env.E2E_TICKET_CREATED_AT = fields.createdAt.toISOString()
+  if (fields.resolvedAt !== undefined) {
+    env.E2E_TICKET_RESOLVED_AT = fields.resolvedAt === null ? 'null' : fields.resolvedAt.toISOString()
+  }
+  writeTicketInDb(env)
+}
+
+// Deletes every ticket (and so every reply) in helpdesk_test. Only for tests of global numbers
+// like GET /api/tickets/stats; every other test finds its own rows by unique values instead.
+export function deleteAllTicketsInDb() {
+  writeTicketInDb({ E2E_DELETE_ALL_TICKETS: '1' })
 }
 
 // Adds a `sender: ai` reply (no author, no bodyHTML) to a ticket directly in helpdesk_test, as the

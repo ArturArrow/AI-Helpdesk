@@ -72,7 +72,7 @@ webhookRouter.post("/inbound-email", async (req, res) => {
         }),
         ...(thread.status === TicketStatus.open
           ? []
-          : [prisma.ticket.update({ where: { id: thread.id }, data: { status: TicketStatus.open } })]),
+          : [prisma.ticket.update({ where: { id: thread.id }, data: { status: TicketStatus.open, resolvedAt: null } })]),
       ]);
       res.status(201).json({ ticket: { id: thread.id }, reply });
       return;

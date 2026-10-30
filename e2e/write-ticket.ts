@@ -1,6 +1,7 @@
-// Run by setTicketStatusInDb / addAiReplyInDb (fixtures/tickets.ts) from server/ with only
-// .env.test loaded. Writes ticket states no endpoint can produce in the test env: the `new` and
-// `processing` statuses (set only by the AI pipeline, which needs OPENAI_API_KEY) and `ai` replies.
+// Run by the DB helpers in fixtures/tickets.ts from server/ with only .env.test loaded. Writes
+// ticket states no endpoint can produce in the test env: the `new` and `processing` statuses (set
+// only by the AI pipeline, which needs OPENAI_API_KEY), `ai` replies, chosen createdAt/resolvedAt
+// values (resolvedAt isn't in any response), and an empty ticket table for the global stats.
 //
 // Imported by a non-literal path for the same reason as seed-agent.ts: the root tsconfig
 // shouldn't type-check server/.
@@ -14,14 +15,34 @@ if (!database.endsWith('_test')) {
   process.exit(1)
 }
 
-const { E2E_TICKET_ID: ticketId, E2E_TICKET_STATUS: status, E2E_AI_REPLY_BODY: aiReplyBody } = process.env
-if (!ticketId || (!status && !aiReplyBody)) {
-  console.error('write-ticket: E2E_TICKET_ID and one of E2E_TICKET_STATUS or E2E_AI_REPLY_BODY must be set')
+const {
+  E2E_DELETE_ALL_TICKETS: deleteAll,
+  E2E_TICKET_ID: ticketId,
+  E2E_TICKET_STATUS: status,
+  E2E_TICKET_CREATED_AT: createdAt,
+  E2E_TICKET_RESOLVED_AT: resolvedAt,
+  E2E_AI_REPLY_BODY: aiReplyBody,
+} = process.env
+const hasTicketWrite = Boolean(status || createdAt || resolvedAt || aiReplyBody)
+if (!deleteAll && !(ticketId && hasTicketWrite)) {
+  console.error(
+    'write-ticket: set E2E_DELETE_ALL_TICKETS, or E2E_TICKET_ID with one of E2E_TICKET_STATUS, ' +
+      'E2E_TICKET_CREATED_AT, E2E_TICKET_RESOLVED_AT or E2E_AI_REPLY_BODY',
+  )
   process.exit(1)
 }
 
 const { prisma } = await import(dbPath)
-const id = Number(ticketId)
-if (status) await prisma.ticket.update({ where: { id }, data: { status } })
-if (aiReplyBody) await prisma.reply.create({ data: { ticketId: id, body: aiReplyBody, sender: 'ai' } })
+// Replies go with their tickets (onDelete: Cascade).
+if (deleteAll) await prisma.ticket.deleteMany()
+if (ticketId) {
+  const id = Number(ticketId)
+  const data: Record<string, unknown> = {}
+  if (status) data.status = status
+  if (createdAt) data.createdAt = new Date(createdAt)
+  // 'null' clears the column.
+  if (resolvedAt) data.resolvedAt = resolvedAt === 'null' ? null : new Date(resolvedAt)
+  if (Object.keys(data).length > 0) await prisma.ticket.update({ where: { id }, data })
+  if (aiReplyBody) await prisma.reply.create({ data: { ticketId: id, body: aiReplyBody, sender: 'ai' } })
+}
 await prisma.$disconnect()

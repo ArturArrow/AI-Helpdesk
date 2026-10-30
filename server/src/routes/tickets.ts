@@ -1,8 +1,16 @@
 import { Router } from "express";
+import type { TicketStats } from "core/constants/ticket";
 import { VISIBLE_TICKET_STATUSES } from "core/constants/ticketStatus";
-import { ticketIdParamsSchema, ticketListQuerySchema, UNCLASSIFIED, updateTicketSchema } from "core/schemas/tickets";
-import type { Prisma } from "../../generated/prisma/client";
-import { Role } from "../../generated/prisma/enums";
+import {
+  statsPeriodDays,
+  ticketIdParamsSchema,
+  ticketListQuerySchema,
+  ticketStatsQuerySchema,
+  UNCLASSIFIED,
+  updateTicketSchema,
+} from "core/schemas/tickets";
+import { Prisma } from "../../generated/prisma/client";
+import { ReplySender, Role, TicketStatus } from "../../generated/prisma/enums";
 import { isAiConfigured, summarizeTicket } from "../lib/ai";
 import { prisma } from "../lib/db";
 import { loadTicketContext } from "../lib/ticketContext";
@@ -100,6 +108,39 @@ ticketsRouter.get("/assignees", async (_req, res) => {
   res.json({ agents });
 });
 
+const FINISHED_STATUSES: TicketStatus[] = [TicketStatus.resolved, TicketStatus.closed];
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// The dashboard's numbers, for any signed-in user. Total counts every ticket, including those the
+// AI is still handling. A ticket counts as resolved by the AI while it's finished and has an AI
+// reply. The period limits total, resolvedByAi and the average to tickets created in it, so the
+// AI share compares like with like; open is always the backlog now. Declared before /:id, like
+// /assignees.
+ticketsRouter.get("/stats", async (req, res) => {
+  const query = validateQuery(ticketStatsQuerySchema, req, res);
+  if (!query) return;
+  const { period } = query;
+
+  const since = period === "all" ? undefined : new Date(Date.now() - statsPeriodDays[period] * DAY_MS);
+  const created = since ? { createdAt: { gte: since } } : {};
+  const finished = { ...created, status: { in: FINISHED_STATUSES } };
+  // Prisma's aggregate can't average a difference of two columns, hence the raw query.
+  const [total, open, resolvedByAi, [{ averageResolutionMs }]] = await prisma.$transaction([
+    prisma.ticket.count({ where: created }),
+    prisma.ticket.count({ where: { status: TicketStatus.open } }),
+    prisma.ticket.count({ where: { ...finished, replies: { some: { sender: ReplySender.ai } } } }),
+    prisma.$queryRaw<[{ averageResolutionMs: number | null }]>`
+      SELECT (AVG(EXTRACT(EPOCH FROM ("resolvedAt" - "createdAt"))) * 1000)::float8 AS "averageResolutionMs"
+      FROM "ticket"
+      WHERE "status" IN (${Prisma.join(FINISHED_STATUSES.map((status) => Prisma.sql`${status}::"TicketStatus"`))})
+        AND "resolvedAt" IS NOT NULL
+        ${since ? Prisma.sql`AND "createdAt" >= ${since}` : Prisma.empty}`,
+  ]);
+  const stats: TicketStats = { total, open, resolvedByAi, averageResolutionMs };
+  res.json(stats);
+});
+
 // assignedToId has no relation, so look the agent up separately. Deleting an agent
 // unassigns their tickets, but the lookup skips the deletedAt filter so a ticket assigned
 // before that rule existed still shows the deleted agent's name.
@@ -124,6 +165,14 @@ ticketsRouter.get("/:id", async (req, res) => {
   res.json({ ticket: await withAssignee(ticket) });
 });
 
+// Stamped when a ticket becomes finished, kept when it moves between resolved and closed,
+// cleared when it's reopened. Undefined leaves the column unchanged.
+function resolvedAtFor(current: TicketStatus, next: TicketStatus): Date | null | undefined {
+  const wasFinished = FINISHED_STATUSES.includes(current);
+  if (!FINISHED_STATUSES.includes(next)) return null;
+  return wasFinished ? undefined : new Date();
+}
+
 // Changes the assignee, status and/or category; fields left out are kept. Any signed-in
 // user may do it.
 ticketsRouter.patch("/:id", async (req, res) => {
@@ -133,7 +182,8 @@ ticketsRouter.patch("/:id", async (req, res) => {
   if (!body) return;
   const { assignedToId, status, category } = body;
 
-  if (!(await prisma.ticket.findUnique({ where: { id: params.id }, select: { id: true } }))) {
+  const current = await prisma.ticket.findUnique({ where: { id: params.id }, select: { status: true } });
+  if (!current) {
     res.status(404).json({ error: "Ticket not found" });
     return;
   }
@@ -145,7 +195,7 @@ ticketsRouter.patch("/:id", async (req, res) => {
   const ticket = await prisma.ticket.update({
     where: { id: params.id },
     // Prisma leaves undefined fields unchanged.
-    data: { assignedToId, status, category },
+    data: { assignedToId, status, category, resolvedAt: status && resolvedAtFor(current.status, status) },
     select: ticketDetailSelect,
   });
   res.json({ ticket: await withAssignee(ticket) });

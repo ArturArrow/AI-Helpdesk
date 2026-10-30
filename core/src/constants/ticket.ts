@@ -25,3 +25,11 @@ export interface TicketDetailData extends Ticket {
   updatedAt: string;
   assignedTo: Assignee | null;
 }
+
+// GET /api/tickets/stats, for the dashboard. averageResolutionMs is null until a ticket is resolved.
+export interface TicketStats {
+  total: number;
+  open: number;
+  resolvedByAi: number;
+  averageResolutionMs: number | null;
+}
