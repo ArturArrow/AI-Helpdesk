@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 import type { Assignee, TicketDetailData } from 'core/constants/ticket'
 import { categoryLabels, TicketCategory } from 'core/constants/ticketCategory'
-import { statusLabels, TicketStatus } from 'core/constants/ticketStatus'
+import { isVisibleStatus, statusLabels, TicketStatus } from 'core/constants/ticketStatus'
 import type { UpdateTicketInput } from 'core/schemas/tickets'
 import {
   Select,
@@ -13,10 +13,13 @@ import {
 } from '@/components/ui/select.tsx'
 import { errorMessage } from '@/lib/errorMessage.ts'
 
+// Every status, so a ticket the AI is still handling shows its own label, but only the ones an
+// agent may set are offered.
 const statusItems = Object.values(TicketStatus).map((status) => ({
   value: status,
   label: statusLabels[status],
 }))
+const selectableStatusItems = statusItems.filter((item) => isVisibleStatus(item.value))
 
 // A null item marks the ticket unclassified again.
 const categoryItems: { value: TicketCategory | null; label: string }[] = [
@@ -57,14 +60,14 @@ function UpdateTicket({ ticket }: { ticket: TicketDetailData }) {
             <Select<TicketStatus>
               items={statusItems}
               value={ticket.status}
-              onValueChange={(status) => status && update.mutate({ status })}
+              onValueChange={(status) => status && isVisibleStatus(status) && update.mutate({ status })}
               disabled={update.isPending}
             >
               <SelectTrigger aria-label="Status" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {statusItems.map((item) => (
+                {selectableStatusItems.map((item) => (
                   <SelectItem key={item.value} value={item.value}>
                     {item.label}
                   </SelectItem>

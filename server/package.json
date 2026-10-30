@@ -28,7 +28,8 @@
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "pg": "^8.23.0",
-    "pg-boss": "^12.38.0"
+    "pg-boss": "^12.38.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/bun": "latest",

@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 import { ADMIN, AGENT, signInViaApi } from '../fixtures/auth.js'
-import { createTicketViaWebhook, updateTicketViaApi, type TicketUpdate } from '../fixtures/tickets.js'
+import { createTicketViaWebhook, setTicketStatusInDb, updateTicketViaApi, type TicketUpdate } from '../fixtures/tickets.js'
 import { createUserViaApi, deleteUserViaApi, uniqueSuffix } from '../fixtures/users.js'
 import { inboundSecret } from '../fixtures/webhook.js'
 
@@ -329,8 +329,9 @@ test.describe('GET /api/tickets filtering', () => {
     })
   }
 
-  // `unclassified` is a category filter only; `Open` checks the match is case-sensitive.
-  for (const status of ['pending', 'Open', 'unclassified', '']) {
+  // `unclassified` is a category filter only; `Open` checks the match is case-sensitive; `new` and
+  // `processing` are real statuses, but only the AI pipeline's, so the list refuses them.
+  for (const status of ['pending', 'Open', 'unclassified', '', 'new', 'processing']) {
     test(`status=${JSON.stringify(status)} gets 400 with the allowed statuses`, async ({ request }) => {
       await signInViaApi(request, AGENT)
       const res = await request.get('/api/tickets', { params: { status } })
@@ -1116,6 +1117,8 @@ test.describe('PATCH /api/tickets/:id status and category', () => {
     ['status "Open" (case-sensitive)', { status: 'Open' }, UPDATE_STATUS_ERROR],
     ['status null', { status: null }, UPDATE_STATUS_ERROR],
     ['status 1', { status: 1 }, UPDATE_STATUS_ERROR],
+    ['status "new" (the AI pipeline\'s only)', { status: 'new' }, UPDATE_STATUS_ERROR],
+    ['status "processing" (the AI pipeline\'s only)', { status: 'processing' }, UPDATE_STATUS_ERROR],
     ['category "billing"', { category: 'billing' }, UPDATE_CATEGORY_ERROR],
     ['category "unclassified" (a list filter, not a value)', { category: 'unclassified' }, UPDATE_CATEGORY_ERROR],
     ['category ""', { category: '' }, UPDATE_CATEGORY_ERROR],
@@ -1172,6 +1175,59 @@ test.describe('PATCH /api/tickets/:id status and category', () => {
     await expectFilter(request, { category: 'refund_request' }, ticket.id, ticket.subject, true)
     await expectFilter(request, { category: 'unclassified' }, ticket.id, ticket.subject, false)
     await expectFilter(request, { status: 'resolved', category: 'refund_request' }, ticket.id, ticket.subject, true)
+  })
+})
+
+// new and processing tickets belong to the AI pipeline, which needs OPENAI_API_KEY (absent in E2E),
+// so the tests set those statuses directly in the DB on a webhook ticket.
+const VISIBLE_STATUSES = ['open', 'resolved', 'closed']
+
+test.describe('tickets the AI is still handling (new, processing)', () => {
+  for (const status of ['new', 'processing']) {
+    test(`a ${status} ticket is left out of the list, its search results and total; an open one with the same token is listed`, async ({ request }) => {
+      const token = `aistate${uniqueSuffix()}`
+      const [hidden, visible] = await createTicketsWithToken(request, token, ['hidden', 'visible'])
+      setTicketStatusInDb(hidden.id, status)
+      await signInViaApi(request, AGENT)
+
+      // q matches both tickets' subjects; only the open one is listed and counted.
+      expect(await getTicketPage(request, { q: token })).toEqual({
+        tickets: [expect.objectContaining({ id: visible.id, status: 'open' })],
+        total: 1,
+      })
+      // The hidden ticket's own subject matches it alone, and finds nothing.
+      expect(await getTicketPage(request, { q: hidden.subject })).toEqual({ tickets: [], total: 0 })
+      expect(await getTicketPage(request, { q: token, status: 'open' })).toEqual({
+        tickets: [expect.objectContaining({ id: visible.id })],
+        total: 1,
+      })
+
+      // The default list (no q) leaves it out too, and holds only visible statuses.
+      const page = await listTickets(request, { pageSize: '100' })
+      expect(page.map((t) => t.id)).not.toContain(hidden.id)
+      for (const t of page) expect(VISIBLE_STATUSES).toContain(t.status)
+    })
+
+    test(`GET /api/tickets/:id still returns a ${status} ticket`, async ({ request }) => {
+      const ticket = await createTicketViaWebhook(request, `detail-${status}`)
+      setTicketStatusInDb(ticket.id, status)
+      await signInViaApi(request, AGENT)
+
+      const res = await request.get(`/api/tickets/${ticket.id}`)
+      expect(res.status()).toBe(200)
+      const { ticket: detail } = await res.json()
+      expect(Object.keys(detail).sort()).toEqual(DETAIL_KEYS)
+      expect(detail).toMatchObject({ id: ticket.id, subject: ticket.subject, status })
+    })
+  }
+
+  test('the total of the default list drops by one when an open ticket becomes processing', async ({ request }) => {
+    const ticket = await createTicketViaWebhook(request, 'total-processing')
+    await signInViaApi(request, AGENT)
+    const before = (await getTicketPage(request, {})).total
+
+    setTicketStatusInDb(ticket.id, 'processing')
+    expect((await getTicketPage(request, {})).total).toBe(before - 1)
   })
 })
 

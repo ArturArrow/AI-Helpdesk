@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { VISIBLE_TICKET_STATUSES } from "core/constants/ticketStatus";
 import { ticketIdParamsSchema, ticketListQuerySchema, UNCLASSIFIED, updateTicketSchema } from "core/schemas/tickets";
 import type { Prisma } from "../../generated/prisma/client";
 import { Role } from "../../generated/prisma/enums";
@@ -49,9 +50,10 @@ ticketsRouter.get("/", async (req, res) => {
   if (!query) return;
   const { sortBy, sortOrder, status, category, q, page, pageSize } = query;
 
-  // An absent filter is undefined, which Prisma ignores.
+  // An absent filter is undefined, which Prisma ignores. Without a status filter, tickets the AI
+  // is still handling (new, processing) are left out.
   const where: Prisma.TicketWhereInput = {
-    status,
+    status: status ?? { in: [...VISIBLE_TICKET_STATUSES] },
     category: category === UNCLASSIFIED ? null : category,
     // An ILIKE '%q%' scan per field: fine at this size; a trigram index or full-text search
     // would be the next step if the table grows.

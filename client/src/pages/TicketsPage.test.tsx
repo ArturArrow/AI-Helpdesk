@@ -479,6 +479,22 @@ describe('TicketsPage', () => {
       expect(screen.queryByRole('button', { name: 'Clear filters' })).not.toBeInTheDocument()
     })
 
+    it('offers only All statuses, Open, Resolved and Closed, not the AI statuses', async () => {
+      const user = userEvent.setup()
+      mockGet().mockResolvedValue(ticketPage(tickets))
+      renderAt('/tickets')
+      await screen.findByRole('cell', { name: 'Refund for order 1234' })
+
+      await user.click(statusSelect())
+      const listbox = await screen.findByRole('listbox')
+      expect(within(listbox).getAllByRole('option').map((o) => o.textContent)).toEqual([
+        'All statuses',
+        'Open',
+        'Resolved',
+        'Closed',
+      ])
+    })
+
     it('re-requests with the status chosen in the select and writes it to the URL', async () => {
       const user = userEvent.setup()
       const get = mockGet().mockResolvedValue(ticketPage(tickets))

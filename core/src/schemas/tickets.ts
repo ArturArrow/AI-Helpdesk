@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TicketCategory } from "../constants/ticketCategory";
-import { TicketStatus } from "../constants/ticketStatus";
+import { VISIBLE_TICKET_STATUSES } from "../constants/ticketStatus";
 
 // Body of POST /api/webhooks/inbound-email. Provider-neutral: a SendGrid/Mailgun adapter
 // (or a forwarding script) maps its own format onto this.
@@ -59,7 +59,7 @@ export const ticketListQuerySchema = z.object({
     .default("createdAt"),
   sortOrder: z.enum(["asc", "desc"], { error: "sortOrder must be asc or desc" }).default("desc"),
   status: z
-    .enum(TicketStatus, { error: `status must be one of: ${Object.values(TicketStatus).join(", ")}` })
+    .enum(VISIBLE_TICKET_STATUSES, { error: `status must be one of: ${VISIBLE_TICKET_STATUSES.join(", ")}` })
     .optional(),
   category: z
     .enum(
@@ -111,7 +111,7 @@ export const updateTicketSchema = z
       .nullable()
       .optional(),
     status: z
-      .enum(TicketStatus, { error: `status must be one of: ${Object.values(TicketStatus).join(", ")}` })
+      .enum(VISIBLE_TICKET_STATUSES, { error: `status must be one of: ${VISIBLE_TICKET_STATUSES.join(", ")}` })
       .optional(),
     category: z
       .enum(TicketCategory, {
