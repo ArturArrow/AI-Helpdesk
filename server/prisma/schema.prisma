@@ -117,6 +117,9 @@ model Ticket {
   category     TicketCategory?
   // User.id of the assigned agent. A plain column, deliberately without a Prisma relation.
   assignedToId String?
+  // When the ticket last became resolved or closed (by an agent or the AI); null while it's
+  // not, and cleared when it's reopened. Feeds the dashboard's average resolution time.
+  resolvedAt   DateTime?
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
   replies      Reply[]

@@ -22,7 +22,8 @@ test.describe('protected routes (unauthenticated)', () => {
     await submitLoginForm(page, ADMIN.email, ADMIN.password)
 
     await expect(page).toHaveURL('/')
-    await expect(page.getByRole('heading', { name: `Welcome, ${ADMIN.name}` })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible()
+    await expect(page.getByRole('navigation').getByText(ADMIN.name, { exact: true })).toBeVisible()
   })
 })
 
@@ -39,12 +40,14 @@ test.describe('role gating', () => {
   test('agent has no Users link and is redirected from /users to /', async ({ page }) => {
     await signInViaApi(page.request, AGENT)
     await page.goto('/')
-    await expect(page.getByRole('heading', { name: `Welcome, ${AGENT.name}` })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible()
+    await expect(page.getByRole('navigation').getByText(AGENT.name, { exact: true })).toBeVisible()
     await expect(page.getByRole('link', { name: 'Users' })).toHaveCount(0)
 
     await page.goto('/users')
     await expect(page).toHaveURL('/')
-    await expect(page.getByRole('heading', { name: `Welcome, ${AGENT.name}` })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible()
+    await expect(page.getByRole('navigation').getByText(AGENT.name, { exact: true })).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Users', level: 1 })).toHaveCount(0)
   })
 

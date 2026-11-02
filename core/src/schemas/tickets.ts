@@ -89,6 +89,39 @@ export type TicketSortField = (typeof ticketSortFields)[number];
 export type TicketListQuery = z.infer<typeof ticketListQuerySchema>;
 export type TicketCategoryFilter = NonNullable<TicketListQuery["category"]>;
 
+// Query of GET /api/tickets/stats: the dashboard counts tickets created in the last N calendar
+// days (today included), or all. Days are counted in tz, the viewer's IANA time zone.
+export const statsPeriods = ["7d", "30d", "90d", "all"] as const;
+export type StatsPeriod = (typeof statsPeriods)[number];
+
+export const statsPeriodDays: Record<Exclude<StatsPeriod, "all">, number> = { "7d": 7, "30d": 30, "90d": 90 };
+
+export const statsPeriodLabels: Record<StatsPeriod, string> = {
+  "7d": "Last 7 days",
+  "30d": "Last 30 days",
+  "90d": "Last 90 days",
+  all: "All time",
+};
+
+// A named zone. Intl also accepts offsets like "+09:00", but Postgres reads those as POSIX zones,
+// where positive means west of UTC, so they'd put tickets on the wrong day.
+function isTimeZone(tz: string) {
+  try {
+    return !/^[+-]/.test(new Intl.DateTimeFormat("en", { timeZone: tz }).resolvedOptions().timeZone);
+  } catch {
+    return false;
+  }
+}
+
+export const ticketStatsQuerySchema = z.object({
+  period: z.enum(statsPeriods, { error: `period must be one of: ${statsPeriods.join(", ")}` }).default("all"),
+  tz: z
+    .string({ error: "tz must be a time zone" })
+    .max(64, "tz must be a time zone")
+    .refine(isTimeZone, "tz must be a time zone")
+    .default("UTC"),
+});
+
 // Params of GET /api/tickets/:id. The upper bound is Postgres int4's, so an oversized id is a
 // 400 rather than a database error.
 export const ticketIdParamsSchema = z.object({

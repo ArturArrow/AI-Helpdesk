@@ -13,11 +13,13 @@ test.describe('session persistence', () => {
   test('survives a reload', async ({ page }) => {
     await signInViaApi(page.request, ADMIN)
     await page.goto('/')
-    await expect(page.getByRole('heading', { name: `Welcome, ${ADMIN.name}` })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible()
+    await expect(page.getByRole('navigation').getByText(ADMIN.name, { exact: true })).toBeVisible()
 
     await page.reload()
     await expect(page).toHaveURL('/')
-    await expect(page.getByRole('heading', { name: `Welcome, ${ADMIN.name}` })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible()
+    await expect(page.getByRole('navigation').getByText(ADMIN.name, { exact: true })).toBeVisible()
   })
 
   test('a UI sign-in is shared with a new page in the same context', async ({ page, context }) => {
@@ -26,13 +28,15 @@ test.describe('session persistence', () => {
     const second = await context.newPage()
     await second.goto('/')
     await expect(second).toHaveURL('/')
-    await expect(second.getByRole('heading', { name: `Welcome, ${AGENT.name}` })).toBeVisible()
+    await expect(second.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible()
+    await expect(second.getByRole('navigation').getByText(AGENT.name, { exact: true })).toBeVisible()
   })
 
   test('a fresh browser context is unauthenticated', async ({ page, browser, baseURL }) => {
     await signInViaApi(page.request, ADMIN)
     await page.goto('/')
-    await expect(page.getByRole('heading', { name: `Welcome, ${ADMIN.name}` })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible()
+    await expect(page.getByRole('navigation').getByText(ADMIN.name, { exact: true })).toBeVisible()
 
     const fresh = await browser.newContext({ baseURL })
     try {
@@ -69,7 +73,7 @@ test.describe('logout', () => {
 
     await page.goBack()
     await expect(page).toHaveURL('/login')
-    await expect(page.getByRole('heading', { name: /Welcome/ })).toHaveCount(0)
+    await expect(page.getByRole('heading', { name: 'Dashboard' })).toHaveCount(0)
     await expect(page.getByRole('navigation')).toHaveCount(0)
   })
 

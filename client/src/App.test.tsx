@@ -32,6 +32,10 @@ const ticket = {
   assignedTo: null,
 }
 
+const stats = { total: 3, open: 2, resolvedByAi: 1, averageResolutionMs: null, ticketsPerDay: [] }
+// The dashboard sends the viewer's time zone, resolved the same way.
+const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+
 async function expectLoginPage() {
   expect(await screen.findByRole('button', { name: 'Sign in' })).toBeInTheDocument()
   expect(screen.getByLabelText('Email')).toBeInTheDocument()
@@ -44,7 +48,7 @@ describe('App routing', () => {
       renderWithRouter(<App />, route)
 
       await expectLoginPage()
-      expect(screen.queryByRole('heading', { name: /Welcome/ })).not.toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: 'Dashboard' })).not.toBeInTheDocument()
     })
   })
 
@@ -55,26 +59,31 @@ describe('App routing', () => {
     // The skeleton wrapper has no role or name; aria-busy is what marks it for assistive tech.
     expect(document.querySelector('[aria-busy="true"]')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Sign in' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: /Welcome/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Dashboard' })).not.toBeInTheDocument()
   })
 
-  it('sends an unknown path to the home page when signed in', async () => {
+  it('sends an unknown path to the dashboard when signed in', async () => {
+    const get = vi.spyOn(axios, 'get').mockResolvedValue({ data: stats })
     mockSession({ name: 'Alan Agent', role: Role.agent })
     renderWithRouter(<App />, '/no-such-page')
 
-    expect(await screen.findByRole('heading', { name: 'Welcome, Alan Agent' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Dashboard', level: 1 })).toBeInTheDocument()
+    expect(get).toHaveBeenCalledWith('/api/tickets/stats', { params: { period: 'all', tz } })
     expect(screen.queryByRole('button', { name: 'Sign in' })).not.toBeInTheDocument()
   })
 
-  it('sends an agent from /users to the home page, with no Users link', async () => {
-    const get = vi.spyOn(axios, 'get').mockResolvedValue({ data: { users: [] } })
+  it('sends an agent from /users to the dashboard, with no Users link', async () => {
+    const get = vi.spyOn(axios, 'get').mockImplementation(async (url: string) =>
+      url === '/api/tickets/stats' ? { data: stats } : { data: { users: [] } },
+    )
     mockSession({ name: 'Alan Agent', role: Role.agent })
     renderWithRouter(<App />, '/users')
 
-    expect(await screen.findByRole('heading', { name: 'Welcome, Alan Agent' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Dashboard', level: 1 })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Users' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Users' })).not.toBeInTheDocument()
-    expect(get).not.toHaveBeenCalled()
+    expect(get).toHaveBeenCalledWith('/api/tickets/stats', { params: { period: 'all', tz } })
+    expect(get).not.toHaveBeenCalledWith('/api/users')
   })
 
   it('shows the Users page to an admin on /users', async () => {
@@ -98,7 +107,7 @@ describe('App routing', () => {
     expect(await screen.findByRole('cell', { name: 'admin@example.com' })).toBeInTheDocument()
     expect(get).toHaveBeenCalledWith('/api/users')
     expect(screen.getByRole('link', { name: 'Users' })).toHaveAttribute('href', '/users')
-    expect(screen.queryByRole('heading', { name: /Welcome/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Dashboard' })).not.toBeInTheDocument()
   })
 
   it.each([
@@ -106,17 +115,19 @@ describe('App routing', () => {
     { name: 'Ada Admin', role: Role.admin },
   ])('takes $role from the Tickets link to the Tickets page', async (sessionUser) => {
     const user = userEvent.setup()
-    const get = vi.spyOn(axios, 'get').mockResolvedValue({ data: { tickets: [], total: 0 } })
+    const get = vi.spyOn(axios, 'get').mockImplementation(async (url: string) =>
+      url === '/api/tickets/stats' ? { data: stats } : { data: { tickets: [], total: 0 } },
+    )
     mockSession(sessionUser)
     renderWithRouter(<App />, '/')
-    expect(await screen.findByRole('heading', { name: `Welcome, ${sessionUser.name}` })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Dashboard', level: 1 })).toBeInTheDocument()
 
     await user.click(screen.getByRole('link', { name: 'Tickets' }))
 
     expect(await screen.findByRole('heading', { name: 'Tickets', level: 1 })).toBeInTheDocument()
     expect(await screen.findByText('No tickets yet.')).toBeInTheDocument()
     expect(get).toHaveBeenCalledWith('/api/tickets', { params: { sortBy: 'createdAt', sortOrder: 'desc', page: 1, pageSize: DEFAULT_TICKET_PAGE_SIZE } })
-    expect(screen.queryByRole('heading', { name: /Welcome/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Dashboard' })).not.toBeInTheDocument()
   })
 
   it.each([
@@ -130,7 +141,7 @@ describe('App routing', () => {
     expect(await screen.findByRole('heading', { name: 'Printer on fire', level: 1 })).toBeInTheDocument()
     expect(get).toHaveBeenCalledWith('/api/tickets/7')
     expect(screen.getByRole('link', { name: 'Tickets' })).toHaveAttribute('href', '/tickets')
-    expect(screen.queryByRole('heading', { name: /Welcome/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Dashboard' })).not.toBeInTheDocument()
   })
 
   it('goes from the list to a ticket and back to the same list URL', async () => {

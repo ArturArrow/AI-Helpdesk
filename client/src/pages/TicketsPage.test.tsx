@@ -5,9 +5,11 @@ import type { Ticket } from 'core/constants/ticket'
 import { TicketCategory } from 'core/constants/ticketCategory'
 import { TicketStatus } from 'core/constants/ticketStatus'
 import { DEFAULT_TICKET_PAGE_SIZE } from 'core/schemas/tickets'
-import { Route, Routes, useLocation, useNavigationType } from 'react-router'
+import { Route, Routes, useLocation } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { httpError } from '@/test/http.ts'
+import { navigationType, urlSearch } from '@/test/location.ts'
+import { LocationProbe } from '@/test/LocationProbe.tsx'
 import { renderWithRouter } from '@/test/render.tsx'
 import { choose } from '@/test/select.ts'
 import TicketsPage from './TicketsPage.tsx'
@@ -62,25 +64,6 @@ function ticketPage(list: Ticket[], total = list.length) {
 
 function mockGet() {
   return vi.spyOn(axios, 'get')
-}
-
-// Shows the router's current query string and how it got there (PUSH or REPLACE), so a test
-// can check what the page wrote to the URL.
-function LocationProbe() {
-  return (
-    <>
-      <output aria-label="URL search">{useLocation().search}</output>
-      <output aria-label="Navigation type">{useNavigationType()}</output>
-    </>
-  )
-}
-
-function urlSearch() {
-  return screen.getByRole('status', { name: 'URL search' }).textContent
-}
-
-function navigationType() {
-  return screen.getByRole('status', { name: 'Navigation type' }).textContent
 }
 
 function renderAt(route: string) {

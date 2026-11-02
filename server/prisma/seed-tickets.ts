@@ -188,6 +188,8 @@ const tickets = templates.map(([subject, category, body], i) => {
   // Open tickets are assigned about half the time; finished ones always have an agent.
   const assigned = agents.length > 0 && (status !== TicketStatus.open || random() < 0.5);
 
+  const updatedAt = status === TicketStatus.open ? createdAt : new Date(Math.min(now, createdAt.getTime() + random() * 5 * DAY));
+
   return {
     subject,
     body,
@@ -198,7 +200,8 @@ const tickets = templates.map(([subject, category, body], i) => {
     category: unclassified ? null : category,
     assignedToId: assigned ? pick(agents).id : null,
     createdAt,
-    updatedAt: status === TicketStatus.open ? createdAt : new Date(Math.min(now, createdAt.getTime() + random() * 5 * DAY)),
+    updatedAt,
+    resolvedAt: status === TicketStatus.open ? null : updatedAt,
   };
 });
 
