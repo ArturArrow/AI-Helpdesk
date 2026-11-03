@@ -135,23 +135,35 @@ enum ReplySender {
   ai
 }
 
+// Whether an agent or AI reply has been emailed to the customer (lib/sendReplyEmail.ts).
+enum EmailStatus {
+  pending
+  sent
+  failed
+}
+
 model Reply {
-  id        Int         @id @default(autoincrement())
-  ticketId  Int
-  ticket    Ticket      @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  body      String
+  id          Int          @id @default(autoincrement())
+  ticketId    Int
+  ticket      Ticket       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  body        String
   // HTML version of a customer's email, when the sender included one. Null for agent replies,
   // which are written as plain text.
-  bodyHTML  String?
+  bodyHTML    String?
   // agent: written in the UI. customer: an email in the ticket's thread (Phase 6). ai: the answer
   // the AI resolved a new ticket with, from the knowledge base.
-  sender    ReplySender
-  // The Message-ID of a customer's email: dedupes redelivered webhooks and threads later
-  // replies to it. Null for agent replies.
-  messageId String?     @unique
-  authorId  String?
-  author    User?       @relation(fields: [authorId], references: [id])
-  createdAt DateTime    @default(now())
+  sender      ReplySender
+  // The Message-ID of the email: for a customer reply, the one it arrived with (dedupes
+  // redelivered webhooks); for an agent or AI reply, the one it was sent with, set once it's
+  // emailed. Either way it threads the customer's later answers onto the ticket.
+  messageId   String?      @unique
+  // Null for customer replies, and for replies stored while the mailer wasn't configured.
+  emailStatus EmailStatus?
+  // When the reply was emailed to the customer.
+  sentAt      DateTime?
+  authorId    String?
+  author      User?        @relation(fields: [authorId], references: [id])
+  createdAt   DateTime     @default(now())
 
   @@index([ticketId, createdAt])
   @@map("reply")

@@ -15,3 +15,8 @@ export const CLIENT_URL = required("CLIENT_URL");
 export const INBOUND_EMAIL_SECRET = required("INBOUND_EMAIL_SECRET");
 // OpenAI key for the AI features (lib/ai.ts). Optional: without it they answer 503.
 export const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+// The mailer (mailer/) that emails agent and AI replies. Optional: without both, replies are
+// only stored (emailStatus null), as in dev without a mail server and in E2E runs.
+export const MAILER_URL = process.env.MAILER_URL;
+export const MAILER_SECRET = process.env.MAILER_SECRET;
+export const isMailerConfigured = Boolean(MAILER_URL && MAILER_SECRET);

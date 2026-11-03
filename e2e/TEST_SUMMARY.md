@@ -2,9 +2,9 @@
 
 ## Last run
 
-- **Date:** 2026-10-30
-- **Discovered (`--list`):** 340 tests in 9 files.
-- **Result:** 2026-10-30, 340 passed, 0 failed (1.0m), including the 43 tests in `ticket-stats.spec.ts` (`?period=`, `?tz=`, `ticketsPerDay`, `resolvedAt`) and the login/routing/session tests now checking the "Dashboard" heading.
+- **Date:** 2026-11-03
+- **Discovered (`--list`):** 342 tests in 9 files.
+- **Result:** 342 passed, 0 failed (56.2s), after the reply `emailStatus`/`sentAt` change, including the new replies tests (both fields null without a mailer; client-supplied `emailStatus`/`sentAt`/`messageId` ignored).
 
 ## tests/login.spec.ts
 
@@ -88,7 +88,7 @@ POST `/api/webhooks/inbound-email`. The route returns `{"ticket":{"id":<number>}
 - The same `messageId` posted twice gets 201, then 200 with the same id.
 - Two concurrent posts with the same new `messageId` get one 201 and one 200, with the same id.
 - Two identical posts without a `messageId` get 201 each, with distinct ids.
-- Threading: `inReplyTo` set to a ticket's `messageId` gets 201 `{ ticket: { id: <that ticket> }, reply: { id } }`; no ticket matches the reply's unique token in the list search, and the ticket's replies are exactly one `customer` reply with the sent `body` and `bodyHTML` and `author` null.
+- Threading: `inReplyTo` set to a ticket's `messageId` gets 201 `{ ticket: { id: <that ticket> }, reply: { id } }`; no ticket matches the reply's unique token in the list search, and the ticket's replies are exactly one `customer` reply with the sent `body` and `bodyHTML`, `emailStatus`, `sentAt` and `author` null.
 - Threading: a ticket's `messageId` only in `references` (after an unknown id, no `inReplyTo`) threads the reply onto that ticket, with no new ticket.
 - Threading: `inReplyTo` set to an earlier customer reply's `messageId` threads onto the same ticket; the thread holds both replies in order and no new ticket exists.
 - Threading: the same reply posted twice gets 201, then 200 with the same ticket and reply ids, and the ticket has one reply.
@@ -245,9 +245,11 @@ Without a session:
 
 POST:
 
-- The agent and the admin (one test each) reply with a padded body: 201 with exactly `{ reply }`, keys `id`, `body`, `bodyHTML`, `sender`, `createdAt`, `author`; the body trimmed, `sender` `agent`, `author` exactly `{ id, name }` of the signed-in user (id from `/api/me`), a numeric id and a parseable `createdAt`. A following GET returns exactly that reply.
+- The agent and the admin (one test each) reply with a padded body: 201 with exactly `{ reply }`, keys `id`, `body`, `bodyHTML`, `sender`, `emailStatus`, `sentAt`, `createdAt`, `author`; the body trimmed, `sender` `agent`, `emailStatus` and `sentAt` null, `author` exactly `{ id, name }` of the signed-in user (id from `/api/me`), a numeric id and a parseable `createdAt`. A following GET returns exactly that reply.
 - A body with `sender: "customer"` and the admin's id as `authorId`, posted by the agent, is stored with `sender` `agent` and the agent as author.
 - An agent reply has the key `bodyHTML` with value `null` in the 201, and the GET list returns it with `bodyHTML: null` too.
+- Without a mailer (`server/.env.test` sets no `MAILER_URL`/`MAILER_SECRET`), a posted reply has `emailStatus: null` and `sentAt: null` in the 201 and in the GET list.
+- `emailStatus: "sent"`, a `sentAt` and a `messageId` sent in the POST body are ignored (zod strips them): the 201 reply has exactly the reply keys, `emailStatus` and `sentAt` null, and GET returns the same reply.
 - A `bodyHTML` sent in the POST body is ignored (zod strips it): the 201 reply and the listed reply have `bodyHTML: null`.
 - A body of exactly 10,000 characters gets 201 and is stored whole.
 - 400, with nothing stored (one test each): an empty, whitespace-only, missing, numeric or null body gets `"Reply can't be empty"`; a 10,001-character body gets `"Reply is too long"`.
@@ -260,7 +262,7 @@ GET:
 - A ticket with no replies returns `{ replies: [] }`.
 - Replies posted by the agent, the admin, then the agent are returned in that order (oldest first), each equal to its POST response, with ascending `createdAt`.
 - Replies posted to two tickets are returned only on their own ticket; a third ticket returns `[]`.
-- An `ai` reply written to the DB after an agent reply is returned second, as exactly `{ id, body, bodyHTML: null, sender: "ai", createdAt, author: null }`.
+- An `ai` reply written to the DB after an agent reply is returned second, as exactly `{ id, body, bodyHTML: null, sender: "ai", emailStatus: null, sentAt: null, createdAt, author: null }`.
 - The agent and the admin (one test each) read a reply written by the other.
 - A reply posted by a fresh agent (created by the admin, signed in in its own request context), who is then soft-deleted: GET by the admin and by the seeded agent still returns the reply unchanged, with `author` exactly the deleted agent's `{ id, name }`.
 - Ids `abc`, `0`, `-1`, `1.5` and `2147483648` get 400 with the id message (one test each).
@@ -368,6 +370,7 @@ GET `/api/tickets/stats` (`{ total, open, resolvedByAi, averageResolutionMs, tic
 - **The replies UI on the detail page** (`ReplyThread`, `ReplyForm`): covered by component tests, not E2E.
 - **The replies `id asc` tie-break:** two replies with the same `createdAt` can't be forced from a serial test. Customer replies (`author: null`, non-null `bodyHTML`) are now created through the webhook and checked in `webhook.spec.ts`.
 - **Threading edge cases not requested:** a ticket set to `closed` (only `resolved` is tested; the route reopens any non-open status), a threaded reply without a `messageId` (stored, but can't be deduped), concurrent redelivery of a reply (the P2002 path), and a reply whose `inReplyTo` and `references` point at different tickets (the route takes the first `findFirst` match) aren't tested.
+- **Emailing replies through the mailer:** with `MAILER_URL` and `MAILER_SECRET` set, POST stores a reply as `emailStatus: "pending"` and a pg-boss job sends it (`sent` with `sentAt`, or `failed`). `server/.env.test` sets neither, so E2E only sees the unconfigured path (`null`/`null`); the send job belongs in server unit tests (`sendReplyEmail.test.ts`). Testing it end to end would need a stub mailer and a separate `webServer` with those variables.
 - **Cascade delete of replies with their ticket:** there is no endpoint that deletes tickets.
 - **A body padded with whitespace past 10,000 characters:** whether the length limit applies to the trimmed text isn't tested.
 - **The polish and summary success paths:** a 200 `{ body }` or `{ summary }` from OpenAI needs `OPENAI_API_KEY` on the test server and a real (or stubbed) model call; deliberately not tested. What `loadTicketContext` passes to the model (latest 20 replies, oldest first, plain-text bodies) isn't observable through the API either; that belongs in server unit tests. The polish UI in `ReplyForm` and the summary UI (`TicketSummary`) belong in component tests.
@@ -376,7 +379,7 @@ GET `/api/tickets/stats` (`{ total, open, resolvedByAi, averageResolutionMs, tic
 - **The dashboard UI:** covered by component tests, not E2E, including its period picker.
 - **Exact period boundaries:** a ticket exactly at the period's first midnight isn't tested; the tz test places tickets 30 minutes either side of it in `Asia/Tokyo`.
 - **Days across a DST change:** no test places tickets on the day a zone changes its clocks (23- or 25-hour days); the zones used for bucketing (`Asia/Tokyo`, Warsaw for a 23:30 UTC ticket that lands on the next day at either offset) make the assertions hold either way.
-- **Not built yet:** sending replies to the customer (no email provider), restoring a deleted user, ticket creation through the API and updates to content (subject, body; PATCH ignores unknown fields), AI features other than reply polishing, ticket summaries, classification and auto-resolving, and email.
+- **Not built yet:** an inbound email provider adapter, restoring a deleted user, ticket creation through the API and updates to content (subject, body; PATCH ignores unknown fields), AI features other than reply polishing, ticket summaries, classification and auto-resolving, and email.
 
 ## Open questions
 
@@ -396,7 +399,7 @@ GET `/api/tickets/stats` (`{ total, open, resolvedByAi, averageResolutionMs, tic
 - **A soft-deleted agent stays shown as a reply's author:** GET `/api/tickets/:id/replies` doesn't filter `deletedAt` on `author`, the same display-only rule as `assignedTo`. `replies.spec.ts` records this.
 - **A reply's `bodyHTML` is raw sender HTML:** customer replies from the webhook store it unsanitized, like the ticket's, and GET replies returns it as sent (`webhook.spec.ts` records this). `ReplyThread` renders it only through `DOMPurify.sanitize`, covered in `ReplyThread.test.tsx`.
 - **Threading doesn't check the sender:** any email naming a known Message-ID becomes a customer reply on that ticket, whoever sent it (the route comment allows for CC'd senders), and the reply stores no sender address. Not asserted either way.
-- **Replies are stored only:** POST answers 201 but nothing is sent to the customer yet (no email provider). The tests record storage only.
+- **Replies are stored only in E2E:** without a mailer configured, POST answers 201 with `emailStatus` and `sentAt` null and nothing is sent or queued. The tests record that; they also depend on `MAILER_URL`/`MAILER_SECRET` being absent from the shell `webServer` inherits, like the `OPENAI_API_KEY` caveat below.
 - **Resolved: the 1 MB webhook parser runs after the secret check.** `index.ts` mounts `requireWebhookSecret, express.json({ limit: "1mb" }), webhookRouter` together, so an unauthenticated caller gets 401 before any body is read. Not tested that the body is unread.
 - **The polish and summary 503 tests depend on the key being absent:** `webServer` inherits the shell's environment, so a `OPENAI_API_KEY` exported in the shell (or added to `server/.env.test`) would turn them into real OpenAI calls and fail them.
 - **PATCH on a `new`/`processing` ticket:** the schema refuses setting those statuses, but nothing stops an agent from PATCHing a ticket the AI is still processing (e.g. to `open`, reachable through the detail link), which could race with the job. Not tested either way.

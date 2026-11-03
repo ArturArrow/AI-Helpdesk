@@ -179,7 +179,7 @@ async function expectNoTicketMatching(request: APIRequestContext, marker: string
 }
 
 test.describe('POST /api/webhooks/inbound-email: threading replies', () => {
-  test('inReplyTo naming a ticket stores a customer reply on it, not a new ticket', async ({ request }) => {
+  test('inReplyTo naming a ticket stores a customer reply on it (emailStatus and sentAt null), not a new ticket', async ({ request }) => {
     const ticket = await createThreadTicket(request, 'thread-root')
     const { token, data } = replyEmail({ inReplyTo: ticket.messageId })
 
@@ -192,6 +192,8 @@ test.describe('POST /api/webhooks/inbound-email: threading replies', () => {
         body: data.body,
         bodyHTML: data.bodyHTML,
         sender: 'customer',
+        emailStatus: null,
+        sentAt: null,
         author: null,
         createdAt: expect.any(String),
       },
