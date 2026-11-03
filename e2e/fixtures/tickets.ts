@@ -75,12 +75,13 @@ export function setTicketStatusInDb(ticketId: number, status: string) {
   writeTicketInDb({ E2E_TICKET_ID: String(ticketId), E2E_TICKET_STATUS: status })
 }
 
-// Writes any of status, createdAt and resolvedAt (null clears it) directly in helpdesk_test, for
-// tests that need known resolution times. Fields left out are unchanged; it doesn't apply the
-// API's resolvedAt rules.
+// Writes any of status, createdAt, resolvedAt and assignedToId (null clears either) directly in
+// helpdesk_test, for tests that need known resolution times or a ticket held by the AI system
+// agent (which PATCH refuses). Fields left out are unchanged; it doesn't apply the API's
+// resolvedAt rules or check the assignee.
 export function setTicketInDb(
   ticketId: number,
-  fields: { status?: string; createdAt?: Date; resolvedAt?: Date | null },
+  fields: { status?: string; createdAt?: Date; resolvedAt?: Date | null; assignedToId?: string | null },
 ) {
   const env: Record<string, string> = { E2E_TICKET_ID: String(ticketId) }
   if (fields.status) env.E2E_TICKET_STATUS = fields.status
@@ -88,6 +89,7 @@ export function setTicketInDb(
   if (fields.resolvedAt !== undefined) {
     env.E2E_TICKET_RESOLVED_AT = fields.resolvedAt === null ? 'null' : fields.resolvedAt.toISOString()
   }
+  if (fields.assignedToId !== undefined) env.E2E_TICKET_ASSIGNED_TO_ID = fields.assignedToId ?? 'null'
   writeTicketInDb(env)
 }
 
@@ -97,8 +99,8 @@ export function deleteAllTicketsInDb() {
   writeTicketInDb({ E2E_DELETE_ALL_TICKETS: '1' })
 }
 
-// Adds a `sender: ai` reply (no author, no bodyHTML) to a ticket directly in helpdesk_test, as the
-// AI pipeline does when it resolves a ticket.
+// Adds a `sender: ai` reply (authored by the AI system agent, no bodyHTML) to a ticket directly in
+// helpdesk_test, as the AI pipeline does when it resolves a ticket.
 export function addAiReplyInDb(ticketId: number, body: string) {
   writeTicketInDb({ E2E_TICKET_ID: String(ticketId), E2E_AI_REPLY_BODY: body })
 }

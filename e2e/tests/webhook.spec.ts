@@ -1,8 +1,8 @@
 import { expect, test, type APIRequestContext, type APIResponse } from '@playwright/test'
 import { ADMIN, signInViaApi } from '../fixtures/auth.js'
-import { uniqueSuffix } from '../fixtures/users.js'
+import { AI_AGENT, createUserViaApi, uniqueSuffix } from '../fixtures/users.js'
 import { inboundSecret } from '../fixtures/webhook.js'
-import { updateTicketViaApi } from '../fixtures/tickets.js'
+import { setTicketInDb, updateTicketViaApi } from '../fixtures/tickets.js'
 
 // The route answers with `{ ticket: { id } }` (plus `reply: { id }` for a threaded email), so most
 // tests check the wire response. The stored list fields are checked through GET /api/tickets in
@@ -80,6 +80,14 @@ test.describe('POST /api/webhooks/inbound-email: creating tickets', () => {
 
   test('201 with a blank subject', async ({ request }) => {
     await expectCreated(await postInbound(request, { ...validEmail(), subject: '   ' }))
+  })
+
+  // E2E runs without OPENAI_API_KEY; with it, a new ticket would start as new and held by the AI.
+  test('without the AI configured, a new ticket is open and unassigned', async ({ request }) => {
+    const id = await expectCreated(await postInbound(request, validEmail()))
+
+    await signInViaApi(request, ADMIN)
+    expect(await getTicket(request, id)).toMatchObject({ status: 'open', assignedTo: null })
   })
 
   test('201 with the optional bodyHTML and messageId', async ({ request }) => {
@@ -163,10 +171,15 @@ async function listReplies(request: APIRequestContext, ticketId: number) {
   return (await res.json()).replies
 }
 
-async function ticketStatus(request: APIRequestContext, ticketId: number): Promise<string> {
+// GET /api/tickets/:id; `request` must be signed in.
+async function getTicket(request: APIRequestContext, ticketId: number) {
   const res = await request.get(`/api/tickets/${ticketId}`)
   expect(res.status()).toBe(200)
-  return (await res.json()).ticket.status
+  return (await res.json()).ticket
+}
+
+async function ticketStatus(request: APIRequestContext, ticketId: number): Promise<string> {
+  return (await getTicket(request, ticketId)).status
 }
 
 // The webhook only returns ids, so check through GET /api/tickets that no ticket holds `marker`
@@ -246,6 +259,37 @@ test.describe('POST /api/webhooks/inbound-email: threading replies', () => {
     await expectReplyCreated(await postInbound(request, data), ticket.id)
 
     expect(await ticketStatus(request, ticket.id)).toBe('open')
+  })
+
+  // Only the AI pipeline assigns the AI (needs OPENAI_API_KEY), so the assignment is written to the DB.
+  test('a customer reply on a resolved ticket held by the AI reopens it and unassigns the AI', async ({ request }) => {
+    const ticket = await createThreadTicket(request, 'thread-ai')
+    setTicketInDb(ticket.id, { status: 'resolved', resolvedAt: new Date(), assignedToId: AI_AGENT.id })
+    await signInViaApi(request, ADMIN)
+    expect(await getTicket(request, ticket.id)).toMatchObject({
+      status: 'resolved',
+      assignedTo: { id: AI_AGENT.id, name: AI_AGENT.name },
+    })
+
+    const { data } = replyEmail({ inReplyTo: ticket.messageId })
+    await expectReplyCreated(await postInbound(request, data), ticket.id)
+
+    expect(await getTicket(request, ticket.id)).toMatchObject({ status: 'open', assignedTo: null })
+  })
+
+  test('a customer reply on a resolved ticket held by an agent reopens it and keeps the agent', async ({ request }) => {
+    const ticket = await createThreadTicket(request, 'thread-agent')
+    await signInViaApi(request, ADMIN)
+    const agent = await createUserViaApi(request, 'thread-assignee')
+    await updateTicketViaApi(request, ticket.id, { assignedToId: agent.id, status: 'resolved' })
+
+    const { data } = replyEmail({ inReplyTo: ticket.messageId })
+    await expectReplyCreated(await postInbound(request, data), ticket.id)
+
+    expect(await getTicket(request, ticket.id)).toMatchObject({
+      status: 'open',
+      assignedTo: { id: agent.id, name: agent.name },
+    })
   })
 
   test('a customer reply leaves an open ticket open', async ({ request }) => {
