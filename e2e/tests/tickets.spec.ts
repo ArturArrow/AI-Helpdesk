@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 import { ADMIN, AGENT, signInViaApi } from '../fixtures/auth.js'
-import { createTicketViaWebhook, setTicketStatusInDb, updateTicketViaApi, type TicketUpdate } from '../fixtures/tickets.js'
-import { createUserViaApi, deleteUserViaApi, uniqueSuffix } from '../fixtures/users.js'
+import { createTicketViaWebhook, setTicketInDb, setTicketStatusInDb, updateTicketViaApi, type TicketUpdate } from '../fixtures/tickets.js'
+import { AI_AGENT, createUserViaApi, deleteUserViaApi, uniqueSuffix } from '../fixtures/users.js'
 import { inboundSecret } from '../fixtures/webhook.js'
 
 // Other specs create tickets in the same database and the list is paginated (10 per page by
@@ -782,6 +782,19 @@ test.describe('GET /api/tickets/:id', () => {
     expect(body.ticket.assignedTo).toEqual({ id: agent.id, name: agent.name })
     expect(body.ticket).not.toHaveProperty('assignedToId')
   })
+
+  // Only the AI pipeline assigns the AI (needs OPENAI_API_KEY), so the assignment is written to the DB.
+  test('a ticket held by the AI system agent has assignedTo { id: "ai-agent", name: "AI" }', async ({ request }) => {
+    const ticket = await createTicketViaWebhook(request, 'detail-ai-assigned')
+    setTicketInDb(ticket.id, { assignedToId: AI_AGENT.id })
+
+    await signInViaApi(request, AGENT)
+    const res = await request.get(`/api/tickets/${ticket.id}`)
+    expect(res.status()).toBe(200)
+    const body = await res.json()
+    expect(Object.keys(body.ticket).sort()).toEqual(DETAIL_KEYS)
+    expect(body.ticket.assignedTo).toEqual({ id: AI_AGENT.id, name: AI_AGENT.name })
+  })
 })
 
 // The signed-in user's id, from /api/me.
@@ -828,6 +841,14 @@ test.describe('GET /api/tickets/assignees', () => {
 
     const agents = await listAssignees(request)
     expect(agents.map((a) => a.id)).not.toContain(adminId)
+  })
+
+  test('the AI system agent is not listed', async ({ request }) => {
+    await signInViaApi(request, AGENT)
+
+    const agents = await listAssignees(request)
+    expect(agents.map((a) => a.id)).not.toContain(AI_AGENT.id)
+    expect(agents.map((a) => a.name)).not.toContain(AI_AGENT.name)
   })
 
   test('a soft-deleted agent is not listed, an active one is', async ({ request }) => {
@@ -970,6 +991,7 @@ test.describe('PATCH /api/tickets/:id', () => {
       await deleteUserViaApi(request, agent.id)
       return agent.id
     }],
+    ['the AI system agent\'s id', async () => AI_AGENT.id],
   ]
   for (const [label, makeId] of notAssignable) {
     test(`${label} gets 400 ${JSON.stringify(ASSIGNEE_ERROR)} and the ticket is unchanged`, async ({ request }) => {
@@ -985,6 +1007,28 @@ test.describe('PATCH /api/tickets/:id', () => {
       expect((await after.json()).ticket.assignedTo).toBeNull()
     })
   }
+
+  test('a ticket held by the AI: a status-only PATCH keeps the AI as assignee', async ({ request }) => {
+    const ticket = await createTicketViaWebhook(request, 'patch-ai-status')
+    setTicketInDb(ticket.id, { assignedToId: AI_AGENT.id })
+    await signInViaApi(request, AGENT)
+
+    const updated = await updateTicketViaApi(request, ticket.id, { status: 'resolved' })
+    expect(updated).toMatchObject({ status: 'resolved', assignedTo: { id: AI_AGENT.id, name: AI_AGENT.name } })
+  })
+
+  test('a ticket held by the AI can be taken over by an agent, or unassigned', async ({ request }) => {
+    await signInViaApi(request, ADMIN)
+    const agent = await createUserViaApi(request, 'patch-ai-takeover')
+    const taken = await createTicketViaWebhook(request, 'patch-ai-takeover')
+    const released = await createTicketViaWebhook(request, 'patch-ai-release')
+    setTicketInDb(taken.id, { assignedToId: AI_AGENT.id })
+    setTicketInDb(released.id, { assignedToId: AI_AGENT.id })
+    await signInViaApi(request, AGENT)
+
+    expect((await updateTicketViaApi(request, taken.id, { assignedToId: agent.id })).assignedTo).toEqual({ id: agent.id, name: agent.name })
+    expect((await updateTicketViaApi(request, released.id, { assignedToId: null })).assignedTo).toBeNull()
+  })
 
   test('a missing assignedToId with no other field gets the empty-body 400, not the assignedToId one', async ({ request }) => {
     const ticket = await createTicketViaWebhook(request, 'patch-missing-assignee')

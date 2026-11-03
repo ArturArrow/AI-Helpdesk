@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { AI_AGENT_ID } from "../lib/aiAgent";
 import type { TicketStats } from "core/constants/ticket";
 import { VISIBLE_TICKET_STATUSES } from "core/constants/ticketStatus";
 import {
@@ -97,7 +98,8 @@ ticketsRouter.get("/", async (req, res) => {
 
 // Who a ticket can be assigned to: active agents. Declared before /:id, which would
 // otherwise take "assignees" as an id.
-const activeAgentWhere = { deletedAt: null, role: Role.agent } as const;
+// The AI agent holds new tickets on its own; it can't be picked.
+const activeAgentWhere = { deletedAt: null, role: Role.agent, id: { not: AI_AGENT_ID } } as const;
 
 ticketsRouter.get("/assignees", async (_req, res) => {
   const agents = await prisma.user.findMany({
@@ -214,7 +216,7 @@ ticketsRouter.patch("/:id", async (req, res) => {
     res.status(404).json({ error: "Ticket not found" });
     return;
   }
-  if (assignedToId && !(await prisma.user.findUnique({ where: { id: assignedToId, ...activeAgentWhere }, select: { id: true } }))) {
+  if (assignedToId && !(await prisma.user.findFirst({ where: { AND: [activeAgentWhere, { id: assignedToId }] }, select: { id: true } }))) {
     res.status(400).json({ error: "assignedToId must be an active agent" });
     return;
   }

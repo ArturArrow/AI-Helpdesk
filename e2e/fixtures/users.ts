@@ -3,6 +3,11 @@ import type { Credentials } from './auth.js'
 
 export type CreatedUser = Credentials & { id: string }
 
+// The "AI" system agent, inserted by server/prisma/migrations/20261103120000_add_ai_agent, so it
+// exists after every reset. It has no account row (can't sign in), is hidden from GET /api/users
+// and the assignee list, and holds tickets only when the AI pipeline (or setTicketInDb) assigns it.
+export const AI_AGENT = { id: 'ai-agent', name: 'AI', email: 'ai@helpdesk.local' }
+
 // Unique per call, so re-runs on the same database and several users per test don't collide.
 export function uniqueSuffix() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`

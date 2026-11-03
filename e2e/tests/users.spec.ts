@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 import { ADMIN, AGENT, ORIGIN, signInViaApi, submitLoginForm } from '../fixtures/auth.js'
-import { createTicketViaWebhook, updateTicketViaApi } from '../fixtures/tickets.js'
-import { createUserViaApi, deleteUserViaApi, uniqueSuffix } from '../fixtures/users.js'
+import { createTicketViaWebhook, setTicketInDb, updateTicketViaApi } from '../fixtures/tickets.js'
+import { AI_AGENT, createUserViaApi, deleteUserViaApi, uniqueSuffix } from '../fixtures/users.js'
 
 // The table row whose Email cell is exactly `email`.
 function userRow(page: Page, email: string) {
@@ -91,6 +91,58 @@ test.describe('GET /api/users', () => {
     const { users } = await (await request.get('/api/users')).json()
     const times = users.map((u: { createdAt: string }) => Date.parse(u.createdAt))
     expect(times).toEqual([...times].sort((a, b) => a - b))
+  })
+})
+
+// The AI system agent is a user row (from a migration) but not a person to manage.
+test.describe('the AI system agent', () => {
+  test('is not listed by GET /api/users', async ({ request }) => {
+    await signInViaApi(request, ADMIN)
+
+    const { users } = await (await request.get('/api/users')).json()
+    expect(users.map((u: { id: string }) => u.id)).not.toContain(AI_AGENT.id)
+    expect(users.map((u: { email: string }) => u.email)).not.toContain(AI_AGENT.email)
+  })
+
+  test('PATCH /api/users/ai-agent gets 404 for the admin; the AI keeps its name', async ({ request }) => {
+    await signInViaApi(request, ADMIN)
+    const ticket = await createTicketViaWebhook(request, 'ai-patch-user')
+    setTicketInDb(ticket.id, { assignedToId: AI_AGENT.id })
+
+    const res = await request.patch(`/api/users/${AI_AGENT.id}`, {
+      data: { name: 'Renamed AI', email: `renamed-ai-${uniqueSuffix()}@example.com` },
+    })
+    expect(res.status()).toBe(404)
+    expect(await res.json()).toEqual({ error: 'User not found' })
+
+    expect((await getTicket(request, ticket.id)).assignedTo).toEqual({ id: AI_AGENT.id, name: AI_AGENT.name })
+  })
+
+  test('DELETE /api/users/ai-agent gets 404 for the admin; its tickets stay assigned to it', async ({ request }) => {
+    await signInViaApi(request, ADMIN)
+    const ticket = await createTicketViaWebhook(request, 'ai-delete-user')
+    setTicketInDb(ticket.id, { assignedToId: AI_AGENT.id })
+
+    const res = await request.delete(`/api/users/${AI_AGENT.id}`)
+    expect(res.status()).toBe(404)
+    expect(await res.json()).toEqual({ error: 'User not found' })
+
+    // A real delete would have unassigned the ticket.
+    expect((await getTicket(request, ticket.id)).assignedTo).toEqual({ id: AI_AGENT.id, name: AI_AGENT.name })
+  })
+
+  test('cannot sign in: it has no password, and the error matches a wrong password', async ({ playwright, baseURL }) => {
+    const fresh = await playwright.request.newContext({ baseURL })
+    try {
+      const ai = await postSignIn(fresh, { email: AI_AGENT.email, password: 'any-password-at-all' })
+      expect(ai.status()).toBe(401)
+      const wrong = await postSignIn(fresh, { email: AGENT.email, password: 'definitely-wrong-password' })
+      expect(wrong.status()).toBe(401)
+      expect((await ai.json()).message).toBe((await wrong.json()).message)
+      expect((await fresh.get('/api/me')).status()).toBe(401)
+    } finally {
+      await fresh.dispose()
+    }
   })
 })
 

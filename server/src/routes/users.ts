@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { createUserSchema, updateUserSchema } from "core/schemas/users";
+import { AI_AGENT_ID } from "../lib/aiAgent";
 import { auth } from "../lib/auth";
 import { Role } from "../../generated/prisma/enums";
 import { prisma } from "../lib/db";
@@ -11,14 +12,17 @@ export const usersRouter = Router();
 const userSelect = { id: true, name: true, email: true, role: true, createdAt: true } as const;
 
 // Soft-deleted users count as missing everywhere except the email uniqueness checks,
-// which still see them, so a deleted user's email stays reserved.
+// which still see them, so a deleted user's email stays reserved. The AI system agent
+// (lib/aiAgent.ts) isn't a person to manage, so it's left out the same way.
+const managedUserWhere = { deletedAt: null, id: { not: AI_AGENT_ID } } as const;
+
 function findActiveUser(id: string) {
-  return prisma.user.findUnique({ where: { id, deletedAt: null }, select: { role: true } });
+  return prisma.user.findFirst({ where: { AND: [managedUserWhere, { id }] }, select: { role: true } });
 }
 
 usersRouter.get("/", async (_req, res) => {
   const users = await prisma.user.findMany({
-    where: { deletedAt: null },
+    where: managedUserWhere,
     select: userSelect,
     orderBy: { createdAt: "asc" },
   });

@@ -4,6 +4,7 @@ import { Prisma } from "../../generated/prisma/client";
 import { ReplySender, TicketStatus } from "../../generated/prisma/enums";
 import { isAiConfigured } from "../lib/ai";
 import { prisma } from "../lib/db";
+import { AI_AGENT_ID } from "../lib/aiAgent";
 import { openForAgent } from "../lib/autoResolveTicket";
 import { AUTO_RESOLVE_TICKET_QUEUE, boss, CLASSIFY_TICKET_QUEUE } from "../lib/queue";
 import { validate } from "../lib/validate";
@@ -73,6 +74,8 @@ webhookRouter.post("/inbound-email", async (req, res) => {
         ...(thread.status === TicketStatus.open
           ? []
           : [prisma.ticket.update({ where: { id: thread.id }, data: { status: TicketStatus.open, resolvedAt: null } })]),
+        // The customer wrote back, so a person takes over from the AI.
+        prisma.ticket.updateMany({ where: { id: thread.id, assignedToId: AI_AGENT_ID }, data: { assignedToId: null } }),
       ]);
       res.status(201).json({ ticket: { id: thread.id }, reply });
       return;
@@ -81,7 +84,10 @@ webhookRouter.post("/inbound-email", async (req, res) => {
     // With AI, a ticket starts as new (hidden from the list) until the AI resolves it or opens it
     // for an agent; without it, it's open straight away.
     const ticket = await prisma.ticket.create({
-      data: { ...fields, status: isAiConfigured ? TicketStatus.new : TicketStatus.open },
+      // The AI agent holds it while it tries to answer; openForAgent unassigns it if it can't.
+      data: isAiConfigured
+        ? { ...fields, status: TicketStatus.new, assignedToId: AI_AGENT_ID }
+        : { ...fields, status: TicketStatus.open },
       // The stored subject, body and sender go straight to classification, without a second read.
       select: { id: true, subject: true, body: true, senderName: true },
     });
