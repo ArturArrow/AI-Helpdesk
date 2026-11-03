@@ -12,11 +12,13 @@ type Reply = {
   body: string
   bodyHTML: string | null
   sender: string
+  emailStatus: string | null
+  sentAt: string | null
   createdAt: string
   author: { id: string; name: string } | null
 }
 
-const REPLY_KEYS = ['author', 'body', 'bodyHTML', 'createdAt', 'id', 'sender']
+const REPLY_KEYS = ['author', 'body', 'bodyHTML', 'createdAt', 'emailStatus', 'id', 'sender', 'sentAt']
 const TICKET_ID_ERROR = 'id must be a positive integer'
 const EMPTY_ERROR = "Reply can't be empty"
 const TOO_LONG_ERROR = 'Reply is too long'
@@ -84,6 +86,8 @@ test.describe('POST /api/tickets/:id/replies', () => {
       expect(reply).toMatchObject({
         body: 'Thanks, we are on it.',
         sender: 'agent',
+        emailStatus: null,
+        sentAt: null,
         author: { id: userId, name: user.name },
       })
       expect(Object.keys(reply.author!).sort()).toEqual(['id', 'name'])
@@ -124,6 +128,41 @@ test.describe('POST /api/tickets/:id/replies', () => {
     const [listed] = await listReplies(request, ticket.id)
     expect(listed).toHaveProperty('bodyHTML', null)
     expect(listed).toEqual(reply)
+  })
+
+  // server/.env.test sets no MAILER_URL / MAILER_SECRET, so nothing is emailed or queued.
+  test('without a mailer, a reply has emailStatus and sentAt null in the 201 and in the GET list', async ({ request }) => {
+    const ticket = await createTicketViaWebhook(request, 'reply-no-mailer')
+    await signInViaApi(request, AGENT)
+
+    const reply = await postReply(request, ticket.id, 'Not emailed')
+    expect(reply).toHaveProperty('emailStatus', null)
+    expect(reply).toHaveProperty('sentAt', null)
+
+    const [listed] = await listReplies(request, ticket.id)
+    expect(listed).toHaveProperty('emailStatus', null)
+    expect(listed).toHaveProperty('sentAt', null)
+    expect(listed).toEqual(reply)
+  })
+
+  test('a client-supplied emailStatus, sentAt and messageId are ignored', async ({ request }) => {
+    const ticket = await createTicketViaWebhook(request, 'reply-email-spoof')
+    await signInViaApi(request, AGENT)
+
+    const res = await request.post(`/api/tickets/${ticket.id}/replies`, {
+      data: {
+        body: 'Already sent?',
+        emailStatus: 'sent',
+        sentAt: '2026-01-01T00:00:00.000Z',
+        messageId: `<reply-spoof-${Date.now()}@example.com>`,
+      },
+    })
+    expect(res.status()).toBe(201)
+    const { reply } = await res.json()
+    expect(Object.keys(reply).sort()).toEqual(REPLY_KEYS)
+    expect(reply).toMatchObject({ body: 'Already sent?', sender: 'agent', emailStatus: null, sentAt: null })
+
+    expect(await listReplies(request, ticket.id)).toEqual([reply])
   })
 
   test('a client-supplied bodyHTML is ignored and stored as null', async ({ request }) => {
@@ -220,7 +259,7 @@ test.describe('GET /api/tickets/:id/replies', () => {
   })
 
   // ai replies come only from the AI pipeline (needs OPENAI_API_KEY), so this one is written to the DB.
-  test('an ai reply is returned with sender ai, the AI system agent as author and bodyHTML null, in order after an agent reply', async ({ request }) => {
+  test('an ai reply is returned with sender ai, the AI system agent as author, and bodyHTML, emailStatus and sentAt null, in order after an agent reply', async ({ request }) => {
     const ticket = await createTicketViaWebhook(request, 'reply-ai')
     await signInViaApi(request, AGENT)
     const agentReply = await postReply(request, ticket.id, 'Agent reply first')
@@ -234,6 +273,8 @@ test.describe('GET /api/tickets/:id/replies', () => {
         body: 'Answered from the knowledge base.',
         bodyHTML: null,
         sender: 'ai',
+        emailStatus: null,
+        sentAt: null,
         createdAt: expect.any(String),
         author: { id: AI_AGENT.id, name: AI_AGENT.name },
       },

@@ -4,7 +4,7 @@ import { toNodeHandler } from "better-auth/node";
 import { isAiConfigured } from "./lib/ai";
 import { auth, CLIENT_IP_HEADER } from "./lib/auth";
 import { prisma } from "./lib/db";
-import { CLIENT_URL } from "./lib/env";
+import { CLIENT_URL, isMailerConfigured } from "./lib/env";
 import { boss, startQueue } from "./lib/queue";
 import { requireAdmin } from "./middleware/requireAdmin";
 import { requireAuth } from "./middleware/requireAuth";
@@ -83,8 +83,9 @@ app.listen(port, async () => {
     console.error("Failed to connect to the database:", error);
   }
 
-  // The only jobs are AI classification and auto-resolving, so without a key pg-boss isn't started at all.
-  if (!isAiConfigured) return;
+  // The jobs are the AI's (classification, auto-resolving) and the reply emails, so with
+  // neither configured pg-boss isn't started at all.
+  if (!isAiConfigured && !isMailerConfigured) return;
   try {
     await startQueue();
     console.log("Background job queue started");

@@ -1,11 +1,13 @@
 import { useQuery } from '@tanstack/react-query'
 import axios from 'axios'
 import DOMPurify from 'dompurify'
+import { EmailStatus, emailStatusLabels } from 'core/constants/emailStatus'
 import { ReplySender, replySenderLabels } from 'core/constants/replySender'
 import type { TicketDetailData } from 'core/constants/ticket'
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card.tsx'
 import { Skeleton } from '@/components/ui/skeleton.tsx'
 import { errorMessage } from '@/lib/errorMessage.ts'
+import { cn } from '@/lib/utils.ts'
 import { repliesQueryKey } from '@/lib/replies.ts'
 
 export interface Reply {
@@ -14,6 +16,9 @@ export interface Reply {
   // Null for agent replies, and for customer emails without an HTML part.
   bodyHTML: string | null
   sender: ReplySender
+  // Whether an agent or AI reply was emailed to the customer. Null for customer replies, and for
+  // replies stored while the server had no mailer.
+  emailStatus: EmailStatus | null
   createdAt: string
   // Null for ReplySender.customer.
   author: { id: string; name: string } | null
@@ -28,6 +33,9 @@ function ReplyThread({ ticket }: { ticket: Pick<TicketDetailData, 'id'> }) {
       const res = await axios.get<{ replies: Reply[] }>(`/api/tickets/${ticketId}/replies`)
       return res.data.replies
     },
+    // Emails go out in the background, so a pending one is polled until it's sent or fails.
+    refetchInterval: (query) =>
+      query.state.data?.some((reply) => reply.emailStatus === EmailStatus.pending) ? 5000 : false,
   })
 
   return (
@@ -61,6 +69,14 @@ function ReplyThread({ ticket }: { ticket: Pick<TicketDetailData, 'id'> }) {
                       <span>{replySenderLabels[reply.sender]}</span>
                       <span>·</span>
                       <time dateTime={reply.createdAt}>{new Date(reply.createdAt).toLocaleString()}</time>
+                      {reply.emailStatus && (
+                        <>
+                          <span>·</span>
+                          <span className={cn(reply.emailStatus === EmailStatus.failed && 'text-destructive')}>
+                            {emailStatusLabels[reply.emailStatus]}
+                          </span>
+                        </>
+                      )}
                     </CardDescription>
                   </CardHeader>
                   {/* The HTML comes from the sender, so it is always sanitized before it is rendered. */}

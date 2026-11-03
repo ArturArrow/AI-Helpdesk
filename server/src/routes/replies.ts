@@ -1,9 +1,11 @@
 import { Router } from "express";
 import { createReplySchema } from "core/schemas/replies";
 import { ticketIdParamsSchema } from "core/schemas/tickets";
-import { ReplySender } from "../../generated/prisma/enums";
+import { EmailStatus, ReplySender } from "../../generated/prisma/enums";
 import { isAiConfigured, polishReply } from "../lib/ai";
 import { prisma } from "../lib/db";
+import { isMailerConfigured } from "../lib/env";
+import { queueReplyEmail } from "../lib/queue";
 import { loadTicketContext } from "../lib/ticketContext";
 import { validate, validateParams } from "../lib/validate";
 
@@ -11,11 +13,14 @@ import { validate, validateParams } from "../lib/validate";
 export const repliesRouter = Router({ mergeParams: true });
 
 // author is null for ReplySender.customer. bodyHTML is the sender's raw, unsanitized HTML.
+// emailStatus is null for customer replies and for replies stored without the mailer.
 const replySelect = {
   id: true,
   body: true,
   bodyHTML: true,
   sender: true,
+  emailStatus: true,
+  sentAt: true,
   createdAt: true,
   author: { select: { id: true, name: true } },
 } as const;
@@ -41,8 +46,9 @@ repliesRouter.get("/", async (req, res) => {
   res.json({ replies });
 });
 
-// An agent's reply, written as the signed-in user. Only stored for now: there is no email
-// provider yet to send it to the customer.
+// An agent's reply, written as the signed-in user. With the mailer configured it's stored as
+// pending and emailed to the customer by a background job (lib/sendReplyEmail.ts), so the
+// response doesn't wait on SMTP.
 repliesRouter.post("/", async (req, res) => {
   const params = validateParams(ticketIdParamsSchema, req, res);
   if (!params) return;
@@ -55,9 +61,16 @@ repliesRouter.post("/", async (req, res) => {
   }
   const reply = await prisma.reply.create({
     // requireAuth (mounted on /api/tickets) has set req.user.
-    data: { ticketId: params.id, body: body.body, sender: ReplySender.agent, authorId: req.user!.id },
+    data: {
+      ticketId: params.id,
+      body: body.body,
+      sender: ReplySender.agent,
+      authorId: req.user!.id,
+      emailStatus: isMailerConfigured ? EmailStatus.pending : null,
+    },
     select: replySelect,
   });
+  await queueReplyEmail(reply.id);
   res.status(201).json({ reply });
 });
 

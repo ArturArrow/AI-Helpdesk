@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { httpError } from '@/test/http.ts'
 import { renderWithRouter } from '@/test/render.tsx'
 import { choose } from '@/test/select.ts'
+import type { Reply } from '@/components/ReplyThread.tsx'
 import TicketDetailPage from './TicketDetailPage.tsx'
 
 const ticket = {
@@ -533,10 +534,12 @@ describe('TicketDetailPage', () => {
     it('shows a sent reply in the thread without fetching the replies again', async () => {
       const user = userEvent.setup()
       const get = mockTicketAndAgents(ticket)
-      const reply = {
+      const reply: Reply = {
         id: 7,
         body: 'We have refunded your order.',
+        bodyHTML: null,
         sender: ReplySender.agent,
+        emailStatus: null,
         createdAt: '2026-04-05T08:00:00.000Z',
         author: { id: 'user-2', name: 'Alan Agent' },
       }

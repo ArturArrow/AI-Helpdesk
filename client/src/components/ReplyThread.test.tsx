@@ -1,7 +1,8 @@
-import { screen, within } from '@testing-library/react'
+import { act, screen, within } from '@testing-library/react'
 import axios from 'axios'
+import { EmailStatus } from 'core/constants/emailStatus'
 import { ReplySender } from 'core/constants/replySender'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { httpError } from '@/test/http.ts'
 import { renderWithQuery } from '@/test/render.tsx'
 import ReplyThread, { type Reply } from './ReplyThread.tsx'
@@ -12,6 +13,7 @@ const replies: Reply[] = [
     body: 'Hello, I was charged twice.',
     bodyHTML: null,
     sender: ReplySender.customer,
+    emailStatus: null,
     createdAt: '2026-04-04T09:30:00.000Z',
     author: null,
   },
@@ -20,6 +22,7 @@ const replies: Reply[] = [
     body: 'Sorry about that, looking into it now.',
     bodyHTML: null,
     sender: ReplySender.agent,
+    emailStatus: EmailStatus.sent,
     createdAt: '2026-04-04T10:05:00.000Z',
     author: { id: 'user-2', name: 'Alan Agent' },
   },
@@ -28,6 +31,7 @@ const replies: Reply[] = [
     body: 'Thanks!',
     bodyHTML: null,
     sender: ReplySender.customer,
+    emailStatus: null,
     createdAt: '2026-04-04T11:45:00.000Z',
     author: null,
   },
@@ -94,6 +98,7 @@ describe('ReplyThread', () => {
       body: 'You can request a refund from the Orders page.',
       bodyHTML: null,
       sender: ReplySender.ai,
+      emailStatus: EmailStatus.sent,
       createdAt: '2026-04-04T12:00:00.000Z',
       author: null,
     }
@@ -106,8 +111,8 @@ describe('ReplyThread', () => {
     expect(within(item).queryByText('Customer')).not.toBeInTheDocument()
     expect(within(item).getByText(new Date(aiReply.createdAt).toLocaleString())).toBeInTheDocument()
     expect(within(item).getByText(aiReply.body)).toBeInTheDocument()
-    // The label, separator, date and body, and nothing else: no author name.
-    expect(item.textContent).toBe(`AI·${new Date(aiReply.createdAt).toLocaleString()}${aiReply.body}`)
+    // The label, date, email status and body, and nothing else: no author name.
+    expect(item.textContent).toBe(`AI·${new Date(aiReply.createdAt).toLocaleString()}·Emailed${aiReply.body}`)
   })
 
   it('says there are no replies when the list is empty', async () => {
@@ -194,6 +199,90 @@ describe('ReplyThread', () => {
       const item = await renderReply('Plain fallback', '')
 
       expect(within(item).getByText('Plain fallback')).toBeInTheDocument()
+    })
+  })
+  describe('email status', () => {
+    // One agent reply with the given email status, as the only item in the thread.
+    async function renderReply(emailStatus: EmailStatus | null) {
+      mockGet().mockResolvedValue({ data: { replies: [{ ...replies[1], emailStatus }] } })
+      renderWithQuery(<ReplyThread ticket={{ id: 42 }} />)
+      return within(await screen.findByRole('list')).getByRole('listitem')
+    }
+
+    it.each([
+      [EmailStatus.pending, 'Sending…'],
+      [EmailStatus.sent, 'Emailed'],
+      [EmailStatus.failed, 'Not sent'],
+    ])('shows %s as "%s" after the time', async (emailStatus, label) => {
+      const item = await renderReply(emailStatus)
+
+      const date = new Date(replies[1].createdAt).toLocaleString()
+      expect(item.textContent).toBe(`Alan AgentAgent·${date}·${label}${replies[1].body}`)
+    })
+
+    it('styles a failed email as destructive', async () => {
+      // The colour is the only cue besides the wording, so the class is what carries it.
+      const item = await renderReply(EmailStatus.failed)
+      expect(within(item).getByText('Not sent')).toHaveClass('text-destructive')
+    })
+
+    it('does not style a sent email as destructive', async () => {
+      const item = await renderReply(EmailStatus.sent)
+      expect(within(item).getByText('Emailed')).not.toHaveClass('text-destructive')
+    })
+
+    it('shows no status or extra separator for a customer reply', async () => {
+      mockGet().mockResolvedValue({ data: { replies: [replies[0]] } })
+      renderWithQuery(<ReplyThread ticket={{ id: 42 }} />)
+
+      const item = within(await screen.findByRole('list')).getByRole('listitem')
+      const date = new Date(replies[0].createdAt).toLocaleString()
+      expect(item.textContent).toBe(`Customer·${date}${replies[0].body}`)
+    })
+  })
+
+  describe('polling', () => {
+    // shouldAdvanceTime keeps findBy* and TanStack Query's own timers running.
+    beforeEach(() => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    function repliesWith(emailStatus: EmailStatus) {
+      return { data: { replies: [replies[0], { ...replies[1], emailStatus }] } }
+    }
+
+    it('refetches every 5 seconds while an email is pending, and stops once it is sent', async () => {
+      const get = mockGet()
+        .mockResolvedValueOnce(repliesWith(EmailStatus.pending))
+        .mockResolvedValue(repliesWith(EmailStatus.sent))
+      renderWithQuery(<ReplyThread ticket={{ id: 42 }} />)
+
+      expect(await within(thread()).findByText('Sending…')).toBeInTheDocument()
+      expect(get).toHaveBeenCalledTimes(1)
+
+      await act(() => vi.advanceTimersByTimeAsync(5000))
+      expect(await within(thread()).findByText('Emailed')).toBeInTheDocument()
+      expect(within(thread()).queryByText('Sending…')).not.toBeInTheDocument()
+      expect(get).toHaveBeenCalledTimes(2)
+      expect(get).toHaveBeenLastCalledWith('/api/tickets/42/replies')
+
+      await act(() => vi.advanceTimersByTimeAsync(15000))
+      expect(get).toHaveBeenCalledTimes(2)
+    })
+
+    it('does not refetch when no email is pending', async () => {
+      const get = mockGet().mockResolvedValue({
+        data: { replies: [...replies, { ...replies[1], id: 4, emailStatus: EmailStatus.failed }] },
+      })
+      renderWithQuery(<ReplyThread ticket={{ id: 42 }} />)
+
+      expect(await within(thread()).findByText('Not sent')).toBeInTheDocument()
+      await act(() => vi.advanceTimersByTimeAsync(15000))
+      expect(get).toHaveBeenCalledTimes(1)
     })
   })
 })

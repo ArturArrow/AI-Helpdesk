@@ -4,11 +4,13 @@
   "version": "0.0.0",
   "type": "module",
   "exports": {
+    "./constants/emailStatus": "./src/constants/emailStatus.ts",
     "./constants/replySender": "./src/constants/replySender.ts",
     "./constants/role": "./src/constants/role.ts",
     "./constants/ticket": "./src/constants/ticket.ts",
     "./constants/ticketCategory": "./src/constants/ticketCategory.ts",
     "./constants/ticketStatus": "./src/constants/ticketStatus.ts",
+    "./schemas/email": "./src/schemas/email.ts",
     "./schemas/replies": "./src/schemas/replies.ts",
     "./schemas/tickets": "./src/schemas/tickets.ts",
     "./schemas/users": "./src/schemas/users.ts"

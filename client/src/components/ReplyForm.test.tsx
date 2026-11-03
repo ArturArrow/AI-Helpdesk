@@ -6,11 +6,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { httpError } from '@/test/http.ts'
 import { renderWithQuery } from '@/test/render.tsx'
 import ReplyForm from './ReplyForm.tsx'
+import type { Reply } from './ReplyThread.tsx'
 
-const reply = {
+const reply: Reply = {
   id: 7,
   body: 'We have refunded your order.',
+  bodyHTML: null,
   sender: ReplySender.agent,
+  emailStatus: null,
   createdAt: '2026-04-05T08:00:00.000Z',
   author: { id: 'user-2', name: 'Alan Agent' },
 }

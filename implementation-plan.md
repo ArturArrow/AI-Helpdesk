@@ -49,9 +49,9 @@
 
 ## Phase 6: Email Integration
 
-- [ ] Set up email provider (SendGrid/Mailgun)
+- [x] Set up email provider — own mail server instead of SendGrid/Mailgun: `mailer/` polls IMAP into the inbound webhook and sends through SMTP (`POST /send`)
 - [x] Implement inbound email webhook to create tickets — `POST /api/webhooks/inbound-email`, provider-neutral JSON behind `X-Inbound-Secret`; no provider adapter yet
-- [ ] Implement outbound email sending when an agent replies (replies are already stored via `POST /api/tickets/:id/replies`)
+- [x] Implement outbound email sending when an agent replies — agent and AI replies are queued on `send-reply-email` and sent through the mailer's `POST /send`, threaded with `In-Reply-To`/`References`; `Reply.emailStatus` shown in the thread
 - [ ] Handle email threading (replies linked to existing tickets) — store them as `Reply` with `sender: customer`
 
 ## Phase 7: Dashboard
