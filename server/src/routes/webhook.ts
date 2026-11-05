@@ -5,6 +5,7 @@ import { ReplySender, TicketStatus } from "../../generated/prisma/enums";
 import { isAiConfigured } from "../lib/ai";
 import { prisma } from "../lib/db";
 import { AI_AGENT_ID } from "../lib/aiAgent";
+import { toAttachmentRows } from "../lib/attachments";
 import { openForAgent } from "../lib/autoResolveTicket";
 import { AUTO_RESOLVE_TICKET_QUEUE, boss, CLASSIFY_TICKET_QUEUE } from "../lib/queue";
 import { validate } from "../lib/validate";
@@ -47,7 +48,8 @@ function findThreadTicket(messageIds: string[]) {
 webhookRouter.post("/inbound-email", async (req, res) => {
   const email = validate(inboundEmailSchema, req, res);
   if (!email) return;
-  const { inReplyTo, references = [], ...fields } = email;
+  const { inReplyTo, references = [], attachments = [], ...fields } = email;
+  const attachmentRows = toAttachmentRows(attachments);
 
   if (fields.messageId) {
     const existing = await findByMessageId(fields.messageId);
@@ -68,6 +70,7 @@ webhookRouter.post("/inbound-email", async (req, res) => {
             bodyHTML: fields.bodyHTML,
             messageId: fields.messageId,
             sender: ReplySender.customer,
+            attachments: { create: attachmentRows.map((row) => ({ ...row, ticketId: thread.id })) },
           },
           select: { id: true },
         }),
@@ -85,9 +88,13 @@ webhookRouter.post("/inbound-email", async (req, res) => {
     // for an agent; without it, it's open straight away.
     const ticket = await prisma.ticket.create({
       // The AI agent holds it while it tries to answer; openForAgent unassigns it if it can't.
-      data: isAiConfigured
-        ? { ...fields, status: TicketStatus.new, assignedToId: AI_AGENT_ID }
-        : { ...fields, status: TicketStatus.open },
+      data: {
+        ...fields,
+        attachments: { create: attachmentRows },
+        ...(isAiConfigured
+          ? { status: TicketStatus.new, assignedToId: AI_AGENT_ID }
+          : { status: TicketStatus.open }),
+      },
       // The stored subject, body and sender go straight to classification, without a second read.
       select: { id: true, subject: true, body: true, senderName: true },
     });
@@ -95,13 +102,15 @@ webhookRouter.post("/inbound-email", async (req, res) => {
     // it may time out and redeliver. The ticket is already stored, so a queue failure only leaves it
     // unclassified, or opens it for an agent.
     if (isAiConfigured) {
+      // The AI can't read the files, but it has to know they're there.
+      const job = { ...ticket, attachments: attachmentRows.map((row) => row.filename) };
       try {
-        await boss.send(CLASSIFY_TICKET_QUEUE, ticket);
+        await boss.send(CLASSIFY_TICKET_QUEUE, job);
       } catch (error) {
         console.error(`[queue] couldn't queue classification of ticket ${ticket.id}:`, error);
       }
       try {
-        await boss.send(AUTO_RESOLVE_TICKET_QUEUE, ticket);
+        await boss.send(AUTO_RESOLVE_TICKET_QUEUE, job);
       } catch (error) {
         console.error(`[queue] couldn't queue auto-resolving ticket ${ticket.id}:`, error);
         await openForAgent(ticket.id);

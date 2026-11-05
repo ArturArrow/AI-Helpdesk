@@ -2,7 +2,9 @@ import { Router } from "express";
 import { AI_AGENT_ID } from "../lib/aiAgent";
 import type { TicketStats } from "core/constants/ticket";
 import { VISIBLE_TICKET_STATUSES } from "core/constants/ticketStatus";
+import { INLINE_IMAGE_TYPES } from "core/constants/attachment";
 import {
+  attachmentParamsSchema,
   statsPeriodDays,
   ticketIdParamsSchema,
   ticketListQuerySchema,
@@ -13,6 +15,7 @@ import {
 import { Prisma } from "../../generated/prisma/client";
 import { ReplySender, Role, TicketStatus } from "../../generated/prisma/enums";
 import { isAiConfigured, summarizeTicket } from "../lib/ai";
+import { attachmentSelect } from "../lib/attachments";
 import { prisma } from "../lib/db";
 import { loadTicketContext } from "../lib/ticketContext";
 import { validate, validateParams, validateQuery } from "../lib/validate";
@@ -41,6 +44,8 @@ const ticketDetailSelect = {
   bodyHTML: true,
   assignedToId: true,
   updatedAt: true,
+  // The files of the ticket's own email; a customer reply's are listed with the reply.
+  attachments: { where: { replyId: null }, select: attachmentSelect, orderBy: { id: "asc" } },
 } as const;
 
 const searchFields = ["subject", "senderName", "senderEmail", "body"] as const;
@@ -192,6 +197,35 @@ ticketsRouter.get("/:id", async (req, res) => {
     return;
   }
   res.json({ ticket: await withAssignee(ticket) });
+});
+
+// A file from a customer's email. It's always sent as a download, and with a generic type unless
+// it's an image we show, so sender-made HTML or SVG never runs on our origin; an <img> ignores
+// Content-Disposition, so inline images still render. The lookup includes the ticket, so an
+// attachment id can't be read through another ticket's URL.
+ticketsRouter.get("/:id/attachments/:attachmentId", async (req, res) => {
+  const params = validateParams(attachmentParamsSchema, req, res);
+  if (!params) return;
+
+  const attachment = await prisma.attachment.findFirst({
+    where: { id: params.attachmentId, ticketId: params.id },
+    select: { filename: true, contentType: true, data: true },
+  });
+  if (!attachment?.data) {
+    res.status(404).json({ error: "Attachment not found" });
+    return;
+  }
+  // res.attachment sets a type from the file's extension, so the type has to come after it.
+  res.attachment(attachment.filename);
+  res.set({
+    "Content-Type": INLINE_IMAGE_TYPES.includes(attachment.contentType)
+      ? attachment.contentType
+      : "application/octet-stream",
+    "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": "sandbox",
+    "Cache-Control": "private",
+  });
+  res.send(Buffer.from(attachment.data));
 });
 
 // Stamped when a ticket becomes finished, kept when it moves between resolved and closed,

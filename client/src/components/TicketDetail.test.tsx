@@ -1,14 +1,17 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
+import { listedFiles, report, screenshot } from '@/test/attachments.ts'
 import TicketDetail from './TicketDetail.tsx'
 
 const ticket = {
+  id: 42,
   senderName: 'Grace Hopper',
   senderEmail: 'grace@example.com',
   createdAt: '2026-03-02T09:15:00.000Z',
   updatedAt: '2026-03-04T17:40:00.000Z',
   body: 'Hello,\n\nMy invoice is wrong.\n  Thanks',
   bodyHTML: null as string | null,
+  attachments: [],
 }
 
 describe('TicketDetail', () => {
@@ -77,6 +80,103 @@ describe('TicketDetail', () => {
       const link = screen.getByText('Click me')
       expect(link).not.toHaveAttribute('href')
       expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    })
+  })
+
+  describe('attachments', () => {
+    const screenshotUrl = '/api/tickets/42/attachments/7'
+    const inlineImage = '<p>See this</p><img src="cid:shot@x" alt="Screenshot">'
+
+    it('shows no attachment list when the ticket has no files', () => {
+      render(<TicketDetail ticket={{ ...ticket, bodyHTML: inlineImage }} />)
+
+      expect(screen.queryByRole('list', { name: 'Attachments' })).not.toBeInTheDocument()
+    })
+
+    it('lists every file under a plain-text body, inline images included', () => {
+      render(<TicketDetail ticket={{ ...ticket, attachments: [screenshot, report] }} />)
+
+      expect(screen.getByText('My invoice is wrong.', { exact: false })).toBeInTheDocument()
+      expect(listedFiles()).toEqual(['shot.png (2 KB)', 'report.pdf (512 B)'])
+    })
+
+    it('points a cid image at its download URL and leaves it out of the list', () => {
+      render(<TicketDetail ticket={{ ...ticket, bodyHTML: inlineImage, attachments: [screenshot, report] }} />)
+
+      expect(screen.getByRole('img', { name: 'Screenshot' })).toHaveAttribute('src', screenshotUrl)
+      expect(listedFiles()).toEqual(['report.pdf (512 B)'])
+    })
+
+    it('shows no list when every file is embedded in the HTML', () => {
+      render(<TicketDetail ticket={{ ...ticket, bodyHTML: inlineImage, attachments: [screenshot] }} />)
+
+      expect(screen.getByRole('img', { name: 'Screenshot' })).toHaveAttribute('src', screenshotUrl)
+      expect(screen.queryByRole('list', { name: 'Attachments' })).not.toBeInTheDocument()
+    })
+
+    it('matches a URL-encoded cid', () => {
+      const bodyHTML = '<img src="cid:shot%40x" alt="Screenshot">'
+      render(<TicketDetail ticket={{ ...ticket, bodyHTML, attachments: [screenshot, report] }} />)
+
+      expect(screen.getByRole('img', { name: 'Screenshot' })).toHaveAttribute('src', screenshotUrl)
+      expect(listedFiles()).toEqual(['report.pdf (512 B)'])
+    })
+
+    it('matches the cid: scheme in any case', () => {
+      const bodyHTML = '<img src="CID:shot@x" alt="Screenshot">'
+      render(<TicketDetail ticket={{ ...ticket, bodyHTML, attachments: [screenshot, report] }} />)
+
+      expect(screen.getByRole('img', { name: 'Screenshot' })).toHaveAttribute('src', screenshotUrl)
+      expect(listedFiles()).toEqual(['report.pdf (512 B)'])
+    })
+
+    it('leaves an unmatched cid as it is and keeps the file in the list', () => {
+      const bodyHTML = '<img src="cid:other@x" alt="Screenshot">'
+      render(<TicketDetail ticket={{ ...ticket, bodyHTML, attachments: [screenshot] }} />)
+
+      expect(screen.getByRole('img', { name: 'Screenshot' })).toHaveAttribute('src', 'cid:other@x')
+      expect(listedFiles()).toEqual(['shot.png (2 KB)'])
+    })
+
+    it('keeps an inline image the HTML never links to in the list', () => {
+      render(<TicketDetail ticket={{ ...ticket, bodyHTML: '<p>Hello</p>', attachments: [screenshot] }} />)
+
+      expect(listedFiles()).toEqual(['shot.png (2 KB)'])
+    })
+
+    it('does not embed an SVG, and keeps it in the list as a download', () => {
+      const svg = { ...screenshot, filename: 'logo.svg', contentType: 'image/svg+xml' }
+      render(<TicketDetail ticket={{ ...ticket, bodyHTML: inlineImage, attachments: [svg] }} />)
+
+      expect(screen.getByRole('img', { name: 'Screenshot' })).toHaveAttribute('src', 'cid:shot@x')
+      expect(listedFiles()).toEqual(['logo.svg (2 KB)'])
+      expect(screen.getByRole('link', { name: 'logo.svg' })).toHaveAttribute('href', screenshotUrl)
+    })
+
+    it('does not embed an image that was too large, and keeps it in the list', () => {
+      const tooLarge = { ...screenshot, tooLarge: true }
+      render(<TicketDetail ticket={{ ...ticket, bodyHTML: inlineImage, attachments: [tooLarge] }} />)
+
+      expect(screen.getByRole('img', { name: 'Screenshot' })).toHaveAttribute('src', 'cid:shot@x')
+      expect(listedFiles()).toEqual(['shot.png (2 KB, too large, not stored)'])
+      expect(screen.queryByRole('link', { name: 'shot.png' })).not.toBeInTheDocument()
+    })
+
+    it('still strips scripts and event handlers from HTML with a cid image', () => {
+      const bodyHTML =
+        '<p>Before</p>' +
+        '<script>window.pwned = true</script>' +
+        '<img src="cid:shot@x" alt="Screenshot" onerror="window.pwned = true">'
+      const { container } = render(<TicketDetail ticket={{ ...ticket, bodyHTML, attachments: [screenshot] }} />)
+
+      expect(screen.getByText('Before')).toBeInTheDocument()
+      // A script element has no role or text to find it by, so this needs a tag query.
+      expect(container.querySelector('script')).toBeNull()
+      expect(container.textContent).not.toContain('pwned')
+
+      const img = screen.getByRole('img', { name: 'Screenshot' })
+      expect(img).toHaveAttribute('src', screenshotUrl)
+      expect(img).not.toHaveAttribute('onerror')
     })
   })
 })

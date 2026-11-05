@@ -46,6 +46,7 @@ export async function sendReplyEmail({ replyId }: ReplyEmailJob, lastAttempt: bo
       body: true,
       emailStatus: true,
       createdAt: true,
+      attachments: { select: { filename: true, contentType: true, data: true }, orderBy: { id: "asc" } },
       ticket: { select: { id: true, subject: true, senderEmail: true, messageId: true } },
     },
   });
@@ -62,6 +63,14 @@ export async function sendReplyEmail({ replyId }: ReplyEmailJob, lastAttempt: bo
       to: reply.ticket.senderEmail,
       subject: replySubject(reply.ticket.subject),
       text: reply.body,
+      // Only replies written here are emailed, and their files are always stored, so data is set.
+      ...(reply.attachments.length > 0 && {
+        attachments: reply.attachments.map(({ filename, contentType, data }) => ({
+          filename,
+          contentType,
+          content: Buffer.from(data!).toString("base64"),
+        })),
+      }),
       ...threadHeaders(reply.ticket.messageId, earlier.map((r) => r.messageId!)),
     };
 

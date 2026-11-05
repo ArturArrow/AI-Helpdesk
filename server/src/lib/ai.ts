@@ -58,6 +58,7 @@ Set resolved to false, with an empty reply, when:
 - the knowledge base doesn't cover the question, or covers only part of it;
 - the request needs a person to act (e.g. issue a refund, change an account's email, look up an order);
 - any of the knowledge base's escalation rules applies;
+- the ticket lists attachments and answering may depend on what's in them, since you can't see them;
 - you are not confident in the answer.
 Don't add facts, links, numbers or promises that aren't in the knowledge base.
 Write the reply in the customer's language, in a friendly, professional support tone.
@@ -70,6 +71,9 @@ export interface TicketContext {
   subject: string;
   body: string;
   senderName: string;
+  // File names only: the model never sees what's in them. Optional, since jobs queued before
+  // attachments existed don't have it.
+  attachments?: string[];
   // The latest MAX_CONTEXT_REPLIES, oldest first.
   replies: { body: string; sender: ReplySender }[];
 }
@@ -108,8 +112,11 @@ function firstName(fullName: string): string {
 // The ticket in <ticket>, then one <reply> per message, oldest first.
 function threadPrompt(ticket: TicketContext): string[] {
   const replies = ticket.replies.map((reply) => `<reply from="${reply.sender}">\n${contextText(reply.body)}\n</reply>`);
+  const attachments = ticket.attachments?.length
+    ? `Attachments (names only, contents not available): ${contextText(ticket.attachments.join(", "))}\n`
+    : "";
   return [
-    `<ticket>\nSubject: ${contextText(ticket.subject)}\nFrom: ${contextText(ticket.senderName)}\n\n${contextText(ticket.body)}\n</ticket>`,
+    `<ticket>\nSubject: ${contextText(ticket.subject)}\nFrom: ${contextText(ticket.senderName)}\n${attachments}\n${contextText(ticket.body)}\n</ticket>`,
     ...replies,
   ];
 }

@@ -30,6 +30,7 @@ const ticket = {
   body: 'It is on fire.',
   bodyHTML: null,
   assignedTo: null,
+  attachments: [],
 }
 
 const stats = { total: 3, open: 2, resolvedByAi: 1, averageResolutionMs: null, ticketsPerDay: [] }

@@ -1,7 +1,40 @@
+import {
+  MAX_ATTACHMENT_BYTES,
+  MAX_EMAIL_ATTACHMENT_BYTES,
+  MAX_STORED_ATTACHMENTS,
+} from "core/constants/attachment";
 import type { InboundEmailInput } from "core/schemas/tickets";
 import { ImapFlow } from "imapflow";
 import { simpleParser, type ParsedMail } from "mailparser";
 import { IMAP, INBOUND_EMAIL_SECRET, POLL_INTERVAL_MS, WEBHOOK_URL } from "./env";
+
+// The webhook's array limit: emails don't realistically reach it, but one that did would be rejected.
+const MAX_LISTED_ATTACHMENTS = 100;
+
+// Files are taken in order until a limit is reached. One that doesn't fit goes without its content,
+// so the ticket is still created and lists it, and the original stays in the processed folder.
+function toInboundAttachments(mail: ParsedMail): InboundEmailInput["attachments"] {
+  if (mail.attachments.length === 0) return undefined;
+  let storedCount = 0;
+  let storedBytes = 0;
+  return mail.attachments.slice(0, MAX_LISTED_ATTACHMENTS).map((attachment) => {
+    const fits =
+      attachment.size <= MAX_ATTACHMENT_BYTES &&
+      storedBytes + attachment.size <= MAX_EMAIL_ATTACHMENT_BYTES &&
+      storedCount < MAX_STORED_ATTACHMENTS;
+    if (fits) {
+      storedCount += 1;
+      storedBytes += attachment.size;
+    }
+    return {
+      filename: attachment.filename ?? "attachment",
+      contentType: attachment.contentType,
+      size: attachment.size,
+      contentId: attachment.cid,
+      content: fits ? attachment.content.toString("base64") : undefined,
+    };
+  });
+}
 
 // Maps a parsed email onto the webhook's body. Missing fields are sent blank rather than
 // guessed, so the webhook rejects them (400) and the email goes to the failed folder.
@@ -19,6 +52,7 @@ export function toInboundEmail(mail: ParsedMail): InboundEmailInput {
     messageId: mail.messageId,
     inReplyTo: mail.inReplyTo,
     references: references === undefined ? undefined : [references].flat(),
+    attachments: toInboundAttachments(mail),
   };
 }
 

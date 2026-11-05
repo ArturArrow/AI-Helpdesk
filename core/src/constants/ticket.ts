@@ -1,3 +1,4 @@
+import type { Attachment } from "./attachment";
 import type { TicketCategory } from "./ticketCategory";
 import type { TicketStatus } from "./ticketStatus";
 
@@ -24,6 +25,8 @@ export interface TicketDetailData extends Ticket {
   bodyHTML: string | null;
   updatedAt: string;
   assignedTo: Assignee | null;
+  // The files that came with the ticket's own email; a reply's come with the reply.
+  attachments: Attachment[];
 }
 
 export interface TicketsOnDay {

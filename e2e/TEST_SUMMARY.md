@@ -2,9 +2,9 @@
 
 ## Last run
 
-- **Date:** 2026-11-03
-- **Discovered (`--list`):** 354 tests in 9 files.
-- **Result:** 354 passed, 0 failed (1.2m), after merging the AI system agent and reply email branches.
+- **Date:** 2026-11-05
+- **Discovered (`--list`):** 462 tests in 9 files.
+- **Result:** 462 passed, 0 failed (1.2m), after stripping NUL from the webhook's text fields.
 
 ## tests/login.spec.ts
 
@@ -93,7 +93,7 @@ POST `/api/webhooks/inbound-email`. The route returns `{"ticket":{"id":<number>}
 - The same `messageId` posted twice gets 201, then 200 with the same id.
 - Two concurrent posts with the same new `messageId` get one 201 and one 200, with the same id.
 - Two identical posts without a `messageId` get 201 each, with distinct ids.
-- Threading: `inReplyTo` set to a ticket's `messageId` gets 201 `{ ticket: { id: <that ticket> }, reply: { id } }`; no ticket matches the reply's unique token in the list search, and the ticket's replies are exactly one `customer` reply with the sent `body` and `bodyHTML`, `emailStatus`, `sentAt` and `author` null.
+- Threading: `inReplyTo` set to a ticket's `messageId` gets 201 `{ ticket: { id: <that ticket> }, reply: { id } }`; no ticket matches the reply's unique token in the list search, and the ticket's replies are exactly one `customer` reply with the sent `body` and `bodyHTML`, `emailStatus`, `sentAt` and `author` null, and `attachments: []`.
 - Threading: a ticket's `messageId` only in `references` (after an unknown id, no `inReplyTo`) threads the reply onto that ticket, with no new ticket.
 - Threading: `inReplyTo` set to an earlier customer reply's `messageId` threads onto the same ticket; the thread holds both replies in order and no new ticket exists.
 - Threading: the same reply posted twice gets 201, then 200 with the same ticket and reply ids, and the ticket has one reply.
@@ -120,8 +120,51 @@ POST `/api/webhooks/inbound-email`. The route returns `{"ticket":{"id":<number>}
 - A `references` entry of 998 characters (unknown ids) gets 201 `{ ticket }`, a new ticket.
 - 101 `references` entries get 400 `{"error":"references has too many entries"}`, and no ticket is listed.
 - 100 `references` entries (unknown ids) get 201 `{ ticket }`, a new ticket.
-- A request over 100 kB (50,000-char `body` + 100,000-char `bodyHTML`) gets 201, so the webhook's own 1 MB `express.json` limit applies instead of the global 100 kB one.
-- A request over 1 MB gets 413 with a JSON `{"error":...}`.
+- A request over 100 kB (50,000-char `body` + 100,000-char `bodyHTML`) gets 201, so the webhook's own `express.json` limit applies instead of the global 100 kB one.
+- A request over 1 MB (a 1.5 MiB random attachment) gets 201, and the file downloads byte for byte.
+- A request over 35 MiB (36 MiB of valid base64 in one attachment) gets 413 with a JSON `{"error":...}`, and no ticket is listed. The schema would answer 400, so only the parser's limit can give this.
+
+Storing attachments (read back through GET `/api/tickets/:id` and `/api/tickets/:id/replies`):
+
+- Two files on a new ticket are listed in the order sent, as exactly `id`, `filename`, `contentType`, `size`, `contentId`, `tooLarge`, with no `data` key.
+- A ticket sent without attachments lists `[]`.
+- A threaded reply's file is listed on the reply (exact fields, no `data`) and not in the ticket's list, which holds only the ticket's own file.
+- A file without `content` is stored with `tooLarge: true` and the `size` as reported.
+- A stored file's `size` comes from its bytes, not the `size` reported.
+- A redelivered ticket (same `messageId`) gets 200 and its list is unchanged.
+- A redelivered reply gets 200, the reply still has one file and the ticket's list stays `[]`.
+
+Emails without text:
+
+- An attachment-only email (empty `body`) gets 201 with the body `(no text)` and the file listed.
+- A blank body with only a listed (`tooLarge`) file gets 201 with `(no text)`.
+- An HTML-only email (whitespace `body`) gets 201 with `(no text)` and the HTML kept.
+- An attachment-only threaded reply is stored with `(no text)` and the file.
+- An empty body, a whitespace body, and an empty body with `attachments: []`, all without HTML (one test each), get 400 `{"error":"body is required"}`, and no ticket is listed.
+- A missing `body` key gets the same 400 even with attachments.
+
+Cleaning attachment fields (one test each, 201 and read back):
+
+- `filename`: NUL stripped (not a 500), line breaks and other control characters stripped, only control characters becomes `attachment`, over 255 characters cut to 255.
+- `contentType`: invalid, containing NUL and missing become `application/octet-stream`; `IMAGE/PNG` is stored lower-cased.
+- `contentId`: invalid, containing NUL and non-string are dropped (`null`); a valid one is stored trimmed.
+
+NUL in text fields (`inboundEmailSchema` strips it before `trim` and the length checks):
+
+- `senderName`, `subject`, `body` and `bodyHTML` with a NUL inside (one test each) get 201, and GET `/api/tickets/:id` returns all four without it.
+- A `messageId` with a NUL gets 201, then 200 with the same id for the same id without the NUL and again with it. No response returns `messageId`, so this is what shows it was stored clean.
+- An unknown `inReplyTo` and an unknown `references` entry with a NUL (one test each) get 201 `{ ticket }`, a new ticket.
+- A reply whose `inReplyTo` is the ticket's `messageId` with a NUL threads onto that ticket: no ticket matches its token, and the thread holds exactly that reply.
+- A `body` of only NUL gets 400 `{"error":"body is required"}` and a `senderName` of only NUL gets 400 `{"error":"senderName is required"}` (one test each), and no ticket is listed.
+- A 998-character `subject` plus a NUL (999 sent) gets 201, and the detail returns the 998 characters.
+
+Attachment limits (each 400 also checks that no ticket is listed):
+
+- 21 stored files get 400 `attachments has too many files`; 20 get 201; 20 stored plus 5 listed get 201 with all 25 listed.
+- 101 entries get 400 `attachments has too many entries`; 100 listed entries get 201.
+- A file of 10 MiB + 1 byte gets 400 `attachment is too large`; exactly 10 MiB gets 201.
+- Three files totalling 25 MiB + 1 byte, each within the file limit and under the JSON limit, get 400 `attachments are too large`; exactly 25 MiB gets 201 with the sizes listed.
+- 400 with the schema message (one test each): invalid base64, `attachments` not an array, a missing `filename`, a missing `size`, a fractional `size`.
 
 ## tests/tickets.spec.ts
 
@@ -191,7 +234,7 @@ Detail (GET `/api/tickets/:id`):
 - The agent and the admin (one test each) get 200 with the ticket just created through the webhook.
 - `abc`, `0`, `-1`, `1.5` and `2147483648` (above int4) get 400 `{"error":"id must be a positive integer"}` (one test each).
 - `2147483647` (the int4 maximum, valid but nonexistent) gets 404 `{"error":"Ticket not found"}`.
-- A webhook ticket sent with `bodyHTML` and a `messageId` comes back as exactly `{ ticket }` with `id`, `subject`, `senderName`, `senderEmail`, `status` `open`, `category` null, parseable `createdAt` and `updatedAt`, `body`, `bodyHTML` equal to the HTML sent, and `assignedTo` null; no `messageId` or `assignedToId`.
+- A webhook ticket sent with `bodyHTML` and a `messageId` comes back as exactly `{ ticket }` with `id`, `subject`, `senderName`, `senderEmail`, `status` `open`, `category` null, parseable `createdAt` and `updatedAt`, `body`, `bodyHTML` equal to the HTML sent, `assignedTo` null and `attachments: []`; no `messageId` or `assignedToId`.
 - `bodyHTML` with attributes, an `onclick` handler and a `<script>` comes back byte-for-byte as sent (the server doesn't sanitize).
 - A ticket created without `bodyHTML` has the detail keys with `bodyHTML: null`.
 - A ticket assigned (through PATCH) to an admin-created agent returns `assignedTo: { id, name }` of that agent, read by the seeded agent, with no `assignedToId`.
@@ -245,9 +288,23 @@ Summary (POST `/api/tickets/:id/summary`, no body; the test server has no `OPENA
 - Ids `abc`, `0`, `-1`, `1.5` and `2147483648` get 400 `{"error":"id must be a positive integer"}` (one test each).
 - `2147483647` (valid but nonexistent) gets 404 `{"error":"Ticket not found"}`, not 503 (lookup before the AI check).
 
+Download (GET `/api/tickets/:id/attachments/:attachmentId`). What the detail lists is checked in `webhook.spec.ts`.
+
+- Without a session, an existing file and `abc`/`abc` get 401 `{"error":"Unauthorized"}`.
+- The agent and the admin (one test each) download a file of every byte value, byte for byte.
+- An empty file gets 200 with an empty body, not 404.
+- A customer reply's file downloads through its ticket.
+- A plain filename is in `Content-Disposition: attachment; filename=...` as it is.
+- A non-ASCII filename is listed as sent, and `Content-Disposition` has it percent-encoded in `filename*=UTF-8''...`.
+- `.html`, `.svg` and `.txt` files (one test each) keep their `contentType` in the list, download as `application/octet-stream` with the bytes intact, and have `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox` and `Cache-Control: private`.
+- `image/png`, `jpeg`, `gif` and `webp` (one test each) keep their type, with the same headers.
+- A PATCH response lists the ticket's files.
+- 404 `{"error":"Attachment not found"}` for an unknown attachment id, an unknown ticket id with a real attachment id, another ticket's attachment (which still downloads through its own ticket) and a `tooLarge` file.
+- Ticket id and attachment id of `abc`, `0`, `-1`, `1.5` and `2147483648` (one test each) get 400 with `id must be a positive integer` and `attachmentId must be a positive integer`.
+
 ## tests/replies.spec.ts
 
-GET and POST `/api/tickets/:id/replies` and POST `/api/tickets/:id/replies/polish`, at the API only (the thread and reply form are covered by component tests). Each test creates its own ticket through the webhook, so a thread holds exactly the replies the test posted.
+GET and POST `/api/tickets/:id/replies` (as JSON and as a multipart form with files) and POST `/api/tickets/:id/replies/polish`, at the API only (the thread and reply form are covered by component tests). Each test creates its own ticket through the webhook, so a thread holds exactly the replies the test posted.
 
 Without a session:
 
@@ -256,8 +313,9 @@ Without a session:
 
 POST:
 
-- The agent and the admin (one test each) reply with a padded body: 201 with exactly `{ reply }`, keys `id`, `body`, `bodyHTML`, `sender`, `emailStatus`, `sentAt`, `createdAt`, `author`; the body trimmed, `sender` `agent`, `emailStatus` and `sentAt` null, `author` exactly `{ id, name }` of the signed-in user (id from `/api/me`), a numeric id and a parseable `createdAt`. A following GET returns exactly that reply.
+- The agent and the admin (one test each) reply with a padded body: 201 with exactly `{ reply }`, keys `id`, `body`, `bodyHTML`, `sender`, `emailStatus`, `sentAt`, `createdAt`, `author`, `attachments`; the body trimmed, `sender` `agent`, `emailStatus` and `sentAt` null, `author` exactly `{ id, name }` of the signed-in user (id from `/api/me`), a numeric id and a parseable `createdAt`. A following GET returns exactly that reply.
 - A body with `sender: "customer"` and the admin's id as `authorId`, posted by the agent, is stored with `sender` `agent` and the agent as author.
+- `attachments` sent in a JSON POST body are ignored (zod strips them): the 201 reply and the listed reply have `attachments: []`.
 - An agent reply has the key `bodyHTML` with value `null` in the 201, and the GET list returns it with `bodyHTML: null` too.
 - Without a mailer (`server/.env.test` sets no `MAILER_URL`/`MAILER_SECRET`), a posted reply has `emailStatus: null` and `sentAt: null` in the 201 and in the GET list.
 - `emailStatus: "sent"`, a `sentAt` and a `messageId` sent in the POST body are ignored (zod strips them): the 201 reply has exactly the reply keys, `emailStatus` and `sentAt` null, and GET returns the same reply.
@@ -268,12 +326,30 @@ POST:
 - An invalid id with an empty body gets the id error (params are validated before the body).
 - `2147483647` (valid but nonexistent) gets 404 `{"error":"Ticket not found"}`.
 
+POST with files (`multipart/form-data`; the size, count, field and malformed-body messages are multer's and busboy's, asserted exactly with a JSON `Content-Type`; "nothing stored" means the thread and the ticket's own attachment list are both `[]`):
+
+- Three files sent out of name order: the 201 lists them in that order as exactly `id`, `filename`, `contentType`, `size`, `contentId` null, `tooLarge` false, with no `data` key, on a reply with `emailStatus` null and the signed-in author. GET returns the same reply, and each file downloads byte for byte, one of them all 256 byte values.
+- The ticket's own attachment list holds only its email's file, not the reply's.
+- `faktura-żółć.pdf` is listed exactly in the 201 and in GET, and `Content-Disposition` has it in `filename*=UTF-8''...`.
+- A multipart reply with no files gets 201 with `attachments: []`.
+- A JSON reply on a ticket that already has a multipart one gets 201 with `attachments: []`, and both are listed in order.
+- A file of exactly 10 MiB gets 201; 10 MiB + 1 byte gets 413 `File too large`, nothing stored.
+- Files of exactly 18 MiB in total (10 + 8) get 201; 18 MiB + 1 byte, each file within its limit, gets 413 `Attachments are too large`, nothing stored.
+- 10 files get 201, listed in the order sent; 11 get 400 `Too many files`, nothing stored.
+- A file in another field gets 400 `Unexpected file field`, alone and after a valid file in `attachments` (one test each), nothing stored.
+- Malformed multipart gets a JSON 400, not 500, nothing stored (one test each): no closing boundary, a file cut off midway and non-multipart content get `Unexpected end of form`; a 20,000-character part header gets `Malformed part header`; a `Content-Type` without a boundary gets `Multipart: Boundary not found`.
+- An empty body, a whitespace-only body and no `body` field, each with a file (one test each), get 400 `"Reply can't be empty"`, nothing stored.
+- Without a session, a multipart POST gets 401 for an existing id and for `abc`, nothing stored.
+- `2147483647` with a file gets 404 `{"error":"Ticket not found"}`, and the attachment ids of uploads just before and after it are consecutive, so no row was inserted.
+- A reply's `.html` file is listed as `text/html` and downloads as `application/octet-stream`, with `Content-Disposition: attachment`, `nosniff` and the bytes intact.
+- `sender: "customer"` and the admin's id as `authorId` in the form, posted by the agent with a file: stored with `sender` `agent` and the agent as author.
+
 GET:
 
 - A ticket with no replies returns `{ replies: [] }`.
 - Replies posted by the agent, the admin, then the agent are returned in that order (oldest first), each equal to its POST response, with ascending `createdAt`.
 - Replies posted to two tickets are returned only on their own ticket; a third ticket returns `[]`.
-- An `ai` reply written to the DB after an agent reply is returned second, as exactly `{ id, body, bodyHTML: null, sender: "ai", emailStatus: null, sentAt: null, createdAt, author: { id: "ai-agent", name: "AI" } }` (the pipeline authors AI replies as the AI system agent).
+- An `ai` reply written to the DB after an agent reply is returned second, as exactly `{ id, body, bodyHTML: null, sender: "ai", emailStatus: null, sentAt: null, createdAt, author: { id: "ai-agent", name: "AI" }, attachments: [] }` (the pipeline authors AI replies as the AI system agent).
 - The agent and the admin (one test each) read a reply written by the other.
 - A reply posted by a fresh agent (created by the admin, signed in in its own request context), who is then soft-deleted: GET by the admin and by the seeded agent still returns the reply unchanged, with `author` exactly the deleted agent's `{ id, name }`.
 - Ids `abc`, `0`, `-1`, `1.5` and `2147483648` get 400 with the id message (one test each).
@@ -343,9 +419,9 @@ GET `/api/tickets/stats` (`{ total, open, resolvedByAi, averageResolutionMs, tic
   - `deleteUserViaApi(request, id)` soft-deletes a user through DELETE `/api/users/:id` (signed in as the admin) and asserts 204.
   - `AI_AGENT` (`{ id: "ai-agent", name: "AI", email: "ai@helpdesk.local" }`), the system user the `20261103120000_add_ai_agent` migration inserts.
   - `users.spec.ts` keeps its own `userRow`, `openNewUserDialog`, `submitNewUser`, `openEditDialog`, `openDeleteDialog` and `postSignIn`, which only it uses.
-- **`fixtures/webhook.ts`:** `inboundSecret()` reads `INBOUND_EMAIL_SECRET` from `server/.env.test` (the file `start:test` loads) with `node:util`'s `parseEnv`, so the tests and the server share one value. It reads lazily and throws a clear error if the value is missing, so other specs still load. `webhook.spec.ts` keeps its own `validEmail` (unique sender per call), `uniqueMessageId`, `postInbound`, `expectUnauthorized`, `expectCreated`, `emailOfLength(n)` (a valid, unique address of exactly n characters), `expectNoTicketMatching(request, marker)` (signs in as the admin, GET `/api/tickets?q=` returns `{ tickets: [], total: 0 }`; used by both the length-limit and the threading tests) and `expectTooLong(res, error)`, and for threading `createThreadTicket` (a ticket with a known `messageId`), `replyEmail` (an answer with a unique token in subject and sender, `bodyHTML` and its own `messageId`), `expectReplyCreated`, `listReplies`, `getTicket` and `ticketStatus`.
-- **`fixtures/tickets.ts`:** `createTicketViaWebhook(request, label, overrides?)` posts a unique email (subject `E2E <label> <suffix>`, unique sender, body `Please help.`) to the inbound webhook with the secret, asserts 201 and returns the ticket's `id`, `subject`, `senderName` and `senderEmail`. `overrides` sets `subject`, `senderName`, `senderEmail`, `body`, `bodyHTML` or `messageId` exactly, for the sorting, search, `bodyHTML` and threading tests; without a `bodyHTML` override none is sent, so the ticket's `bodyHTML` is null. The defaults contain no `%`, `_` or `\`. It needs no session. `updateTicketViaApi(request, ticketId, data)` sends any of `assignedToId`, `status`, `category` (type `TicketUpdate`; `null` unassigns or unclassifies) through PATCH `/api/tickets/:id`, asserts 200 and returns the ticket; the request must be signed in. `setTicketStatusInDb(ticketId, status)` and `addAiReplyInDb(ticketId, body)` write what only the AI pipeline produces (a `new`/`processing` status, a `sender: ai` reply authored by `ai-agent`) straight to `helpdesk_test`, through `e2e/write-ticket.ts`. `setTicketInDb(ticketId, { status?, createdAt?, resolvedAt?, assignedToId? })` writes any of those (`null` clears `resolvedAt` or `assignedToId`) the same way, for known resolution times and tickets held by the AI (which PATCH refuses); it bypasses the API's `resolvedAt` rules and assignee check. `deleteAllTicketsInDb()` deletes every ticket (replies cascade), only for the global stats tests. `ticket-stats.spec.ts` keeps its own `getStats(request, { period?, tz? })` (asserts 200, returns the whole response), `getCounts(request, period?)` (the same without `ticketsPerDay`; no query string without a period), `averageOf(request)`, `expectStampedBetween`, date helpers (`dateIn(tz)`, `addDays`, `datesFrom`, `atLocal(date, time, tz)`, `noonUtc`, `countOn`, `sumOf`) and `onStableDays(zones, fetch)` (reruns the setup and requests if a zone's date changed meanwhile). `tickets.spec.ts` keeps its own `getTicket(request, id)` (GET `/api/tickets/:id`, asserts 200, returns the ticket), `expectUpdated(request, before, data, changes)` (PATCH, then the response equals `before` plus `changes` with a later `updatedAt`, and a GET matches), `currentUserId(request)` (the signed-in user's id from `/api/me`), `listAssignees(request)` (GET `/api/tickets/assignees`, asserts 200 and exactly `{ agents }`), `getTicketPage(request, params)` (GET with sort, filter, search and paging params, asserts 200, returns `{ tickets, total }`), `listTickets(request, params)` (the same, returning only `tickets`), `expectInOrder(tickets, ids)` (the ids are listed in that relative order), `searchOverride(field, token)` (puts a token into one field) `expectAllContain(tickets, text)` (every row holds the text in subject, sender name or email), `expectRowsMatch(tickets, filters)` and `expectFilter(request, filters, id, subject, listed)` (the filter keeps or drops the ticket, and every row of a page of 100 matches), and `createTicketsWithToken(request, token, labels)` (one ticket per label, subject `<token> <label>`).
-- `replies.spec.ts` keeps its own `currentUserId(request)`, `listReplies(request, ticketId)` (GET, asserts 200 and exactly `{ replies }`) and `postReply(request, ticketId, body)` (POST, asserts 201 and exactly `{ reply }`), which only it uses.
+- **`fixtures/webhook.ts`:** `inboundSecret()` reads `INBOUND_EMAIL_SECRET` from `server/.env.test` (the file `start:test` loads) with `node:util`'s `parseEnv`, so the tests and the server share one value. It reads lazily and throws a clear error if the value is missing, so other specs still load. `webhook.spec.ts` keeps its own `validEmail` (unique sender per call), `uniqueMessageId`, `postInbound`, `expectUnauthorized`, `expectCreated`, `emailOfLength(n)` (a valid, unique address of exactly n characters), `expectNoTicketMatching(request, marker)` (signs in as the admin, GET `/api/tickets?q=` returns `{ tickets: [], total: 0 }`; used by both the length-limit and the threading tests) and `expectTooLong(res, error)`, and for threading `createThreadTicket` (a ticket with a known `messageId`), `replyEmail` (an answer with a unique token in subject and sender, `bodyHTML` and its own `messageId`), `expectReplyCreated`, `listReplies`, `getTicket` and `ticketStatus`, and for attachments `textFile`, `fileOfSize(bytes)`, `listedOnlyFile(size?)` (no `content`), `listAttachments`, `storedAttachment(request, file)` (posts one file, returns it as listed) and `expectRejected(request, attachments, error)` (the 400 and no ticket listed), and `withNul(text)` (puts a NUL after the second character).
+- **`fixtures/tickets.ts`:** `createTicketViaWebhook(request, label, overrides?)` posts a unique email (subject `E2E <label> <suffix>`, unique sender, body `Please help.`) to the inbound webhook with the secret, asserts 201 and returns the ticket's `id`, `subject`, `senderName` and `senderEmail`. `overrides` sets `subject`, `senderName`, `senderEmail`, `body`, `bodyHTML`, `messageId` or `attachments` exactly, for the sorting, search, `bodyHTML`, threading and attachment tests; without a `bodyHTML` override none is sent, so the ticket's `bodyHTML` is null. The defaults contain no `%`, `_` or `\`. It needs no session. `fileAttachment(filename, contentType, bytes)` builds a file in the webhook's shape (base64 `content`, `size` from the bytes); `InboundAttachment` and `ListedAttachment` type what goes in and comes out. `updateTicketViaApi(request, ticketId, data)` sends any of `assignedToId`, `status`, `category` (type `TicketUpdate`; `null` unassigns or unclassifies) through PATCH `/api/tickets/:id`, asserts 200 and returns the ticket; the request must be signed in. `setTicketStatusInDb(ticketId, status)` and `addAiReplyInDb(ticketId, body)` write what only the AI pipeline produces (a `new`/`processing` status, a `sender: ai` reply authored by `ai-agent`) straight to `helpdesk_test`, through `e2e/write-ticket.ts`. `setTicketInDb(ticketId, { status?, createdAt?, resolvedAt?, assignedToId? })` writes any of those (`null` clears `resolvedAt` or `assignedToId`) the same way, for known resolution times and tickets held by the AI (which PATCH refuses); it bypasses the API's `resolvedAt` rules and assignee check. `deleteAllTicketsInDb()` deletes every ticket (replies cascade), only for the global stats tests. `ticket-stats.spec.ts` keeps its own `getStats(request, { period?, tz? })` (asserts 200, returns the whole response), `getCounts(request, period?)` (the same without `ticketsPerDay`; no query string without a period), `averageOf(request)`, `expectStampedBetween`, date helpers (`dateIn(tz)`, `addDays`, `datesFrom`, `atLocal(date, time, tz)`, `noonUtc`, `countOn`, `sumOf`) and `onStableDays(zones, fetch)` (reruns the setup and requests if a zone's date changed meanwhile). `tickets.spec.ts` keeps its own `getTicket(request, id)` (GET `/api/tickets/:id`, asserts 200, returns the ticket), `expectUpdated(request, before, data, changes)` (PATCH, then the response equals `before` plus `changes` with a later `updatedAt`, and a GET matches), `currentUserId(request)` (the signed-in user's id from `/api/me`), `listAssignees(request)` (GET `/api/tickets/assignees`, asserts 200 and exactly `{ agents }`), `getTicketPage(request, params)` (GET with sort, filter, search and paging params, asserts 200, returns `{ tickets, total }`), `listTickets(request, params)` (the same, returning only `tickets`), `expectInOrder(tickets, ids)` (the ids are listed in that relative order), `searchOverride(field, token)` (puts a token into one field) `expectAllContain(tickets, text)` (every row holds the text in subject, sender name or email), `expectRowsMatch(tickets, filters)` and `expectFilter(request, filters, id, subject, listed)` (the filter keeps or drops the ticket, and every row of a page of 100 matches), `createTicketsWithToken(request, token, labels)` (one ticket per label, subject `<token> <label>`), and inside the download describe `downloadPath`, `createTicketWithFile`, `download` and `expectSafeHeaders`.
+- `replies.spec.ts` keeps its own `currentUserId(request)`, `listReplies(request, ticketId)` (GET, asserts 200 and exactly `{ replies }`) and `postReply(request, ticketId, body)` (POST, asserts 201 and exactly `{ reply }`), and for files `replyForm(fields, files?, fileField?)` (builds the `FormData`), `fileOfSize(filename, size)`, `filesNamed(count)`, `listedFile(filename, contentType, size)` (the expected listing), `sendForm` (POST, returns the response), `postForm` (POST, asserts 201 and exactly `{ reply }`), `download`, `ticketAttachments`, `expectJsonError(res, status, error)` and `expectNothingStored(request, ticketId)`, which only it uses.
 - Helpers are plain exported functions: no page objects and no `test.extend` fixtures.
 - **`global-setup.ts`:** runs the test-DB guard, `prisma migrate reset --force`, the admin seed, then `seed-agent.ts`. Each run starts with two users who can sign in, the admin and the agent, plus the AI system agent (`ai-agent`) inserted by a migration, which has no credential account.
 - **`write-ticket.ts`:** run by the DB helpers in `fixtures/tickets.ts` with `execSync` from `server/` with only `.env.test` loaded (like the global-setup steps). It refuses any database not ending in `_test`, then, through the server's Prisma client (imported by a non-literal path), deletes all tickets (`E2E_DELETE_ALL_TICKETS`) and/or, for `E2E_TICKET_ID`, sets `status`, `createdAt`, `resolvedAt`, `assignedToId` (`E2E_TICKET_STATUS`, `E2E_TICKET_CREATED_AT`, `E2E_TICKET_RESOLVED_AT` (ISO or `null`), `E2E_TICKET_ASSIGNED_TO_ID` (a user id or `null`)) and/or adds an `ai` reply authored by `ai-agent` (`E2E_AI_REPLY_BODY`).
@@ -367,7 +443,7 @@ GET `/api/tickets/stats` (`{ total, open, resolvedByAi, averageResolutionMs, tic
 - **Deleting an admin through the UI:** admin rows have no delete button, so it's covered only at the API (403).
 - **The "Deleting…" pending state:** not tested; it would need holding the DELETE request.
 - **Stored webhook tickets, beyond the returned fields:** GET `/api/tickets/:id` returns `body` and `bodyHTML` (checked in `tickets.spec.ts`), but never `messageId`, so that can't be checked as stored. That a missing or blank subject is listed as `"(no subject)"` and that a dedupe adds no second row aren't checked; that a 400 stores nothing is checked only for the length-limit cases.
-- **Subject length limit (998):** the schema has it, but no webhook test covers the 999 → 400 `"subject is too long"` / 998 → 201 boundary.
+- **Subject length limit (998):** 998 characters plus a NUL gets 201, but no webhook test covers 999 real characters → 400 `"subject is too long"`.
 - **Length limits measured after trim:** a value padded with whitespace past the limit isn't tested (nor that `bodyHTML`, which isn't trimmed, counts its whitespace).
 - **The `/tickets` page UI:** the table's headers, rows and order, the category label, the empty, loading and error states, and the Tickets navbar link are covered by the Vitest component tests (`client/src/pages/TicketsPage.test.tsx`, `client/src/components/Navbar.test.tsx`), not E2E. The client redirect of an unauthenticated `/tickets` visit and the navbar link navigating there are covered in `client/src/App.test.tsx`; the server side is covered by the GET `/api/tickets` 401. E2E keeps the API tests, which need the real server and database.
 - **Sort order of status and category values:** the sorting tests predate PATCH status/category and still check only the 200 and the newest-first tie-break. The enum declaration order (open < resolved < closed; general_question < technical_question < refund_request) and nulls-last for category could now be tested by setting values through PATCH; not added since it wasn't requested.
@@ -392,6 +468,15 @@ GET `/api/tickets/stats` (`{ total, open, resolvedByAi, averageResolutionMs, tic
 - **The dashboard UI:** covered by component tests, not E2E, including its period picker.
 - **Exact period boundaries:** a ticket exactly at the period's first midnight isn't tested; the tz test places tickets 30 minutes either side of it in `Asia/Tokyo`.
 - **Days across a DST change:** no test places tickets on the day a zone changes its clocks (23- or 25-hour days); the zones used for bucketing (`Asia/Tokyo`, Warsaw for a 23:30 UTC ticket that lands on the next day at either offset) make the assertions hold either way.
+- **NUL cases not requested:** a threaded reply's `body` or `bodyHTML` with a NUL, a `references` entry with a NUL that matches a ticket, a blank `body` with a `bodyHTML` of only NUL, a `messageId`, `inReplyTo` or `references` entry of only NUL, and NUL in `senderEmail` (not stripped; the schema's email check should refuse it with a 400).
+- **Attachments in the UI:** `AttachmentList`, inline `cid:` images and `emailHtml.ts` belong in component tests, not E2E.
+- **The mailer's side of attachments:** which files it sends, and which it leaves out as too large, is in `mailer/src/inbound.test.ts`.
+- **Emailing a reply's files:** `sendReplyEmail` and the mailer's `/send` need a mailer, which E2E runs without; they're in `sendReplyEmail.test.ts` and `mailer/src/outbound.test.ts`.
+- **Cleaning a reply's filename and type:** `attachmentFilenameSchema` and `attachmentContentTypeSchema` are covered through the webhook in `webhook.spec.ts`; not repeated for multipart, and not requested.
+- **The order of the upload checks against the other errors:** a bad ticket id, or a missing ticket, combined with an over-limit upload (the upload checks answer first) isn't tested.
+- **Filenames passed to the AI jobs:** the webhook adds them to the queued job only with `OPENAI_API_KEY`, so that needs server unit tests.
+- **Concurrent redelivery with attachments:** only sequential redelivery is tested; the P2002 path can't be forced from a serial test.
+- **Attachments going with their ticket:** the cascade is only exercised by the stats tests' table wipe, which checks nothing about attachments, and there is no endpoint that deletes tickets.
 - **Not built yet:** an inbound email provider adapter, restoring a deleted user, ticket creation through the API and updates to content (subject, body; PATCH ignores unknown fields), AI features other than reply polishing, ticket summaries, classification and auto-resolving, and email.
 
 ## Open questions
@@ -413,7 +498,7 @@ GET `/api/tickets/stats` (`{ total, open, resolvedByAi, averageResolutionMs, tic
 - **A reply's `bodyHTML` is raw sender HTML:** customer replies from the webhook store it unsanitized, like the ticket's, and GET replies returns it as sent (`webhook.spec.ts` records this). `ReplyThread` renders it only through `DOMPurify.sanitize`, covered in `ReplyThread.test.tsx`.
 - **Threading doesn't check the sender:** any email naming a known Message-ID becomes a customer reply on that ticket, whoever sent it (the route comment allows for CC'd senders), and the reply stores no sender address. Not asserted either way.
 - **Replies are stored only in E2E:** without a mailer configured, POST answers 201 with `emailStatus` and `sentAt` null and nothing is sent or queued. The tests record that; they also depend on `MAILER_URL`/`MAILER_SECRET` being absent from the shell `webServer` inherits, like the `OPENAI_API_KEY` caveat below.
-- **Resolved: the 1 MB webhook parser runs after the secret check.** `index.ts` mounts `requireWebhookSecret, express.json({ limit: "1mb" }), webhookRouter` together, so an unauthenticated caller gets 401 before any body is read. Not tested that the body is unread.
+- **Resolved: the webhook parser runs after the secret check.** `index.ts` mounts `requireWebhookSecret, express.json({ limit: "35mb" }), webhookRouter` together, so an unauthenticated caller gets 401 before any body is read. Not tested that the body is unread.
 - **The polish and summary 503 tests depend on the key being absent:** `webServer` inherits the shell's environment, so a `OPENAI_API_KEY` exported in the shell (or added to `server/.env.test`) would turn them into real OpenAI calls and fail them.
 - **PATCH on a `new`/`processing` ticket:** the schema refuses setting those statuses, but nothing stops an agent from PATCHing a ticket the AI is still processing (e.g. to `open`, reachable through the detail link), which could race with the job. Not tested either way.
 - **Direct DB writes are back:** `write-ticket.ts` writes states the API can't produce in E2E. If a test endpoint or a stubbed model ever lets the pipeline run, these tests should switch to it.
@@ -424,4 +509,12 @@ GET `/api/tickets/stats` (`{ total, open, resolvedByAi, averageResolutionMs, tic
 - **Tickets resolved before the migration have no `resolvedAt`:** they're left out of the average (tested: a resolved ticket with null `resolvedAt` is ignored), so the average reflects only tickets finished since the column existed.
 - **Every `ai` reply now has the AI as author:** the pipeline sets `authorId: ai-agent` and the migration backfills old ones, so `author` is no longer null for `sender: ai`; `replies.spec.ts` records this. Code telling an AI reply apart by a null author would break, but the project rule is to use `sender` anyway.
 - **A threaded reply unassigns the AI even from an open ticket:** the webhook's `updateMany` on `assignedToId: ai-agent` runs whatever the status. Only the resolved case is tested.
+- **The attachment limits are MiB, not MB:** `MAX_ATTACHMENT_BYTES` is 10 × 1024 × 1024, and body-parser reads `35mb` as 35 × 1024 × 1024. The boundary tests use those exact values.
+- **A missing `body` key is still a 400 with attachments:** only a blank `body` is accepted. `webhook.spec.ts` records this; the mailer sends the key blank.
+- **`(no text)` is stored in `body`:** so `?q=no text` finds attachment-only tickets, and an agent sees that text where the email had none. Not tested.
+- **Resolved: text fields are cleaned of NUL.** `inboundEmailSchema` strips it from `senderName`, `subject`, `body`, `bodyHTML`, `messageId`, `inReplyTo` and each `references` entry; `webhook.spec.ts` covers it. Not confirmed by a run yet.
+- **The large-request tests are the slowest in the suite:** the 10 MiB, 25 MiB and 35 MiB tests send their payloads through the Vite proxy and use `test.slow()`. The 413 relies on body-parser reading off the whole request before answering (`dump` in `lib/read.js`). Not confirmed by a run.
+- **A reply's upload errors are the libraries' English text:** `uploadAttachments` passes on multer's and busboy's messages (`File too large`, `Unexpected file field`, `Unexpected end of form`), so `replies.spec.ts` would fail on a reworded message after a multer upgrade, and an agent could see that text. Mapping them to our own messages would make the tests and the wording stable. The status, JSON shape and messages were checked against multer 2.5.0 under Bun and through a Vite proxy in a throwaway server with no database, not in a suite run.
+- **The 18 MiB total is checked after the upload is in memory:** multer buffers up to 10 files of 10 MiB, so any signed-in user can make one request hold 100 MiB before the 413. Not tested.
+- **`Attachment`'s schema comment still says "customer's email":** agents' files use the same model now. Nothing a test sees.
 - **App changes needed:** likely one, for the `tz=+09:00` stats test (see the offset-`tz` entry above). Every locator uses an accessible label, role or text.

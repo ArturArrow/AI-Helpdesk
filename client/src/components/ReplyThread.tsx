@@ -1,11 +1,13 @@
 import { useQuery } from '@tanstack/react-query'
 import axios from 'axios'
-import DOMPurify from 'dompurify'
+import type { Attachment } from 'core/constants/attachment'
 import { EmailStatus, emailStatusLabels } from 'core/constants/emailStatus'
 import { ReplySender, replySenderLabels } from 'core/constants/replySender'
 import type { TicketDetailData } from 'core/constants/ticket'
+import AttachmentList from '@/components/AttachmentList.tsx'
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card.tsx'
 import { Skeleton } from '@/components/ui/skeleton.tsx'
+import { emailContent } from '@/lib/emailHtml.ts'
 import { errorMessage } from '@/lib/errorMessage.ts'
 import { cn } from '@/lib/utils.ts'
 import { repliesQueryKey } from '@/lib/replies.ts'
@@ -22,6 +24,8 @@ export interface Reply {
   createdAt: string
   // Null for ReplySender.customer.
   author: { id: string; name: string } | null
+  // The files of a customer's email, or the ones an agent sent with the reply.
+  attachments: Attachment[]
 }
 
 // The ticket's replies, oldest first, as the API returns them.
@@ -58,6 +62,7 @@ function ReplyThread({ ticket }: { ticket: Pick<TicketDetailData, 'id'> }) {
         <ol className="space-y-3">
           {replies.map((reply) => {
             const fromAgent = reply.sender === ReplySender.agent
+            const { html, listed } = emailContent(reply.bodyHTML, ticket.id, reply.attachments)
             return (
               <li key={reply.id}>
                 <Card>
@@ -79,15 +84,13 @@ function ReplyThread({ ticket }: { ticket: Pick<TicketDetailData, 'id'> }) {
                       )}
                     </CardDescription>
                   </CardHeader>
-                  {/* The HTML comes from the sender, so it is always sanitized before it is rendered. */}
-                  {reply.bodyHTML ? (
-                    <CardContent
-                      className="text-sm wrap-break-word"
-                      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(reply.bodyHTML) }}
-                    />
+                  {/* emailContent sanitizes the HTML, which comes from the sender. */}
+                  {html ? (
+                    <CardContent className="text-sm wrap-break-word" dangerouslySetInnerHTML={{ __html: html }} />
                   ) : (
                     <CardContent className="text-sm wrap-break-word whitespace-pre-wrap">{reply.body}</CardContent>
                   )}
+                  <AttachmentList ticketId={ticket.id} attachments={listed} />
                 </Card>
               </li>
             )

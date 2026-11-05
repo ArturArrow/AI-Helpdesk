@@ -11,6 +11,30 @@ export type CreatedTicket = {
   senderEmail: string
 }
 
+// A file as the webhook takes it. Without `content` it's one the mailer left out for being too large.
+export type InboundAttachment = {
+  filename: string
+  contentType?: string
+  size: number
+  contentId?: string
+  content?: string
+}
+
+// A file as the ticket and reply endpoints list it.
+export type ListedAttachment = {
+  id: number
+  filename: string
+  contentType: string
+  size: number
+  contentId: string | null
+  tooLarge: boolean
+}
+
+// A file with these bytes, in the shape the webhook takes.
+export function fileAttachment(filename: string, contentType: string, bytes: Buffer): InboundAttachment {
+  return { filename, contentType, size: bytes.length, content: bytes.toString('base64') }
+}
+
 // Creates a ticket through the inbound-email webhook (the only way to create one so far).
 // Subject and sender are unique per call, so tests can find their own rows among other specs'.
 // `overrides` sets any of these fields exactly, for tests that sort or search on them. No bodyHTML
@@ -26,6 +50,7 @@ export async function createTicketViaWebhook(
     body?: string
     bodyHTML?: string
     messageId?: string
+    attachments?: InboundAttachment[]
   } = {},
 ): Promise<CreatedTicket> {
   const suffix = uniqueSuffix()

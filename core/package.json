@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "exports": {
+    "./constants/attachment": "./src/constants/attachment.ts",
     "./constants/emailStatus": "./src/constants/emailStatus.ts",
     "./constants/replySender": "./src/constants/replySender.ts",
     "./constants/role": "./src/constants/role.ts",

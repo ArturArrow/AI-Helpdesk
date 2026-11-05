@@ -47,6 +47,30 @@ describe("POST /send", () => {
     expect(sendMail).not.toHaveBeenCalled();
   });
 
+  it("passes attachments to nodemailer as base64, without any other field", async () => {
+    const content = Buffer.from("%PDF-1.7").toString("base64");
+    const file = { filename: "faktura-ż.pdf", contentType: "application/pdf", content };
+    const res = await send({ ...message, attachments: [{ ...file, path: "/etc/passwd", href: "http://evil.test" }] });
+    expect(res.status).toBe(200);
+    expect(sendMail.mock.calls[0]![0]).toEqual({
+      from: testEnv.MAIL_FROM,
+      ...message,
+      attachments: [{ ...file, encoding: "base64" }],
+    });
+  });
+
+  it("accepts a request over the 100 kB default, for attachments", async () => {
+    const content = Buffer.alloc(2 * 1024 * 1024).toString("base64");
+    const res = await send({ ...message, attachments: [{ filename: "a.bin", contentType: "a/b", content }] });
+    expect(res.status).toBe(200);
+  });
+
+  it("answers 400 for attachment content that isn't base64", async () => {
+    const res = await send({ ...message, attachments: [{ filename: "a", contentType: "a/b", content: "not base64!" }] });
+    expect(res.status).toBe(400);
+    expect(sendMail).not.toHaveBeenCalled();
+  });
+
   it("answers 400 with the first issue for an invalid address", async () => {
     const res = await send({ ...message, to: "not-an-email" });
     expect(res.status).toBe(400);

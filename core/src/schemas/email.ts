@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_REPLY_ATTACHMENTS } from "../constants/attachment";
 
 const messageId = z.string().trim().min(1).max(998, "Message-ID is too long");
 
@@ -17,6 +18,17 @@ export const sendEmailSchema = z.object({
   references: z
     .array(messageId, { error: "references must be an array of Message-IDs" })
     .max(100, "references has too many entries")
+    .optional(),
+  attachments: z
+    .array(
+      z.object({
+        filename: z.string().min(1).max(255, "attachment filename is too long"),
+        contentType: z.string().min(1).max(255, "attachment contentType is too long"),
+        content: z.base64("attachment content must be base64"),
+      }),
+      { error: "attachments must be an array" },
+    )
+    .max(MAX_REPLY_ATTACHMENTS, "attachments has too many entries")
     .optional(),
 });
 
