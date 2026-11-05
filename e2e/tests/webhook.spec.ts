@@ -1,14 +1,16 @@
+import { randomBytes } from 'node:crypto'
 import { expect, test, type APIRequestContext, type APIResponse } from '@playwright/test'
 import { ADMIN, signInViaApi } from '../fixtures/auth.js'
 import { AI_AGENT, createUserViaApi, uniqueSuffix } from '../fixtures/users.js'
 import { inboundSecret } from '../fixtures/webhook.js'
-import { setTicketInDb, updateTicketViaApi } from '../fixtures/tickets.js'
+import { fileAttachment, setTicketInDb, updateTicketViaApi, type ListedAttachment } from '../fixtures/tickets.js'
 
 // The route answers with `{ ticket: { id } }` (plus `reply: { id }` for a threaded email), so most
 // tests check the wire response. The stored list fields are checked through GET /api/tickets in
 // tickets.spec.ts; the threading tests read the stored replies and status back through the API.
 
 const ENDPOINT = '/api/webhooks/inbound-email'
+const MiB = 1024 * 1024
 
 // A valid body with a unique sender, so tests never share data.
 function validEmail() {
@@ -209,6 +211,7 @@ test.describe('POST /api/webhooks/inbound-email: threading replies', () => {
         sentAt: null,
         author: null,
         createdAt: expect.any(String),
+        attachments: [],
       },
     ])
   })
@@ -491,18 +494,355 @@ test.describe('POST /api/webhooks/inbound-email: length limits', () => {
     await expectCreated(await postInbound(request, { ...validEmail(), references }))
   })
 
-  test('201 for a request over 100 kB: the webhook has its own 1 MB JSON limit', async ({ request }) => {
+  test('201 for a request over 100 kB: the webhook has its own JSON limit', async ({ request }) => {
     const data = { ...validEmail(), body: 'b'.repeat(50_000), bodyHTML: `<p>${'h'.repeat(100_000 - 7)}</p>` }
     // The global parser's 100 kB default would answer this with 413.
     expect(JSON.stringify(data).length).toBeGreaterThan(100 * 1024)
     await expectCreated(await postInbound(request, data))
   })
 
-  test('a request over 1 MB gets a JSON 413', async ({ request }) => {
-    const data = { ...validEmail(), body: 'x'.repeat(1100 * 1024) }
-    expect(JSON.stringify(data).length).toBeGreaterThan(1024 * 1024)
+  test('201 for a request over 1 MB with an attachment, and the file downloads whole', async ({ request }) => {
+    const bytes = randomBytes(1.5 * MiB)
+    const data = { ...validEmail(), attachments: [fileAttachment('photo.bin', 'application/octet-stream', bytes)] }
+    expect(JSON.stringify(data).length).toBeGreaterThan(MiB)
+    const id = await expectCreated(await postInbound(request, data))
+
+    await signInViaApi(request, ADMIN)
+    const [attachment] = await listAttachments(request, id)
+    const res = await request.get(`/api/tickets/${id}/attachments/${attachment.id}`)
+    expect(res.status()).toBe(200)
+    expect((await res.body()).equals(bytes)).toBe(true)
+  })
+
+  test('a request over 35 MB gets a JSON 413, and no ticket is stored', async ({ request }) => {
+    test.slow()
+    const subject = `Over the JSON limit ${uniqueSuffix()}`
+    // Valid base64, so only the parser's limit can answer 413; the schema would have said 400.
+    const content = 'a'.repeat(36 * MiB)
+    const data = { ...validEmail(), subject, attachments: [{ filename: 'huge.bin', contentType: 'application/zip', size: 1, content }] }
+    expect(JSON.stringify(data).length).toBeGreaterThan(35 * MiB)
+
     const res = await postInbound(request, data)
     expect(res.status()).toBe(413)
     expect(await res.json()).toEqual({ error: expect.any(String) })
+    await expectNoTicketMatching(request, subject)
   })
+})
+
+const ATTACHMENT_KEYS = ['contentId', 'contentType', 'filename', 'id', 'size', 'tooLarge']
+
+// A small stored file, of known bytes.
+const textFile = (filename = 'note.txt') => fileAttachment(filename, 'text/plain', Buffer.from('hello'))
+
+// A stored file of exactly `bytes` bytes.
+const fileOfSize = (bytes: number) => fileAttachment('file.bin', 'application/octet-stream', Buffer.alloc(bytes, 0x61))
+
+// A file over the limits, which the mailer sends without content.
+const listedOnlyFile = (size = 50_000_000) => ({ filename: 'video.mp4', contentType: 'video/mp4', size })
+
+// The ticket's files, from GET /api/tickets/:id; `request` must be signed in.
+async function listAttachments(request: APIRequestContext, ticketId: number): Promise<ListedAttachment[]> {
+  return (await getTicket(request, ticketId)).attachments
+}
+
+// Posts one email with this file and returns it as stored. Signs `request` in as the admin.
+async function storedAttachment(request: APIRequestContext, file: object): Promise<ListedAttachment> {
+  const id = await expectCreated(await postInbound(request, { ...validEmail(), attachments: [file] }))
+  await signInViaApi(request, ADMIN)
+  const attachments = await listAttachments(request, id)
+  expect(attachments).toHaveLength(1)
+  return attachments[0]
+}
+
+// The webhook refuses these attachments with this error and stores no ticket.
+async function expectRejected(request: APIRequestContext, attachments: unknown, error: string) {
+  const subject = `Rejected attachments ${uniqueSuffix()}`
+  const res = await postInbound(request, { ...validEmail(), subject, attachments })
+  expect(res.status()).toBe(400)
+  expect(await res.json()).toEqual({ error })
+  await expectNoTicketMatching(request, subject)
+}
+
+test.describe('POST /api/webhooks/inbound-email: storing attachments', () => {
+  test('files on a new ticket are listed in order with their fields, and without data', async ({ request }) => {
+    const report = fileAttachment('report.pdf', 'application/pdf', Buffer.from('%PDF-1.7'))
+    const logo = { ...fileAttachment('logo.png', 'image/png', Buffer.from('not really')), contentId: 'logo@example.com' }
+    const id = await expectCreated(await postInbound(request, { ...validEmail(), attachments: [report, logo] }))
+
+    await signInViaApi(request, ADMIN)
+    const attachments = await listAttachments(request, id)
+    expect(attachments).toEqual([
+      { id: expect.any(Number), filename: 'report.pdf', contentType: 'application/pdf', size: 8, contentId: null, tooLarge: false },
+      { id: expect.any(Number), filename: 'logo.png', contentType: 'image/png', size: 10, contentId: 'logo@example.com', tooLarge: false },
+    ])
+    for (const attachment of attachments) {
+      expect(Object.keys(attachment).sort()).toEqual(ATTACHMENT_KEYS)
+      expect(attachment).not.toHaveProperty('data')
+    }
+  })
+
+  test('a ticket sent without attachments lists none', async ({ request }) => {
+    const id = await expectCreated(await postInbound(request, validEmail()))
+
+    await signInViaApi(request, ADMIN)
+    expect(await listAttachments(request, id)).toEqual([])
+  })
+
+  test("a threaded reply's files are listed on the reply, without data, and not in the ticket's list", async ({ request }) => {
+    const ticketFile = textFile('ticket.txt')
+    const messageId = uniqueMessageId('attachment-root')
+    const ticketId = await expectCreated(
+      await postInbound(request, { ...validEmail(), messageId, attachments: [ticketFile] }),
+    )
+    const { data } = replyEmail({ inReplyTo: messageId })
+    const replyId = await expectReplyCreated(
+      await postInbound(request, { ...data, attachments: [textFile('reply.txt')] }),
+      ticketId,
+    )
+
+    await signInViaApi(request, ADMIN)
+    const onTicket = await listAttachments(request, ticketId)
+    expect(onTicket.map((a) => a.filename)).toEqual(['ticket.txt'])
+
+    const [reply] = await listReplies(request, ticketId)
+    expect(reply.id).toBe(replyId)
+    expect(reply.attachments).toEqual([
+      { id: expect.any(Number), filename: 'reply.txt', contentType: 'text/plain', size: 5, contentId: null, tooLarge: false },
+    ])
+    expect(Object.keys(reply.attachments[0]).sort()).toEqual(ATTACHMENT_KEYS)
+    expect(reply.attachments[0]).not.toHaveProperty('data')
+  })
+
+  test('a file without content is stored as tooLarge, listed with the size as reported', async ({ request }) => {
+    const attachment = await storedAttachment(request, listedOnlyFile(52_428_800))
+    expect(attachment).toEqual({
+      id: expect.any(Number),
+      filename: 'video.mp4',
+      contentType: 'video/mp4',
+      size: 52_428_800,
+      contentId: null,
+      tooLarge: true,
+    })
+  })
+
+  test('a stored file has the size of its bytes, not the size reported', async ({ request }) => {
+    const attachment = await storedAttachment(request, { ...textFile(), size: 999 })
+    expect(attachment).toMatchObject({ size: 5, tooLarge: false })
+  })
+
+  test('a redelivered ticket does not duplicate its attachments', async ({ request }) => {
+    const data = { ...validEmail(), messageId: uniqueMessageId('attachment-dedupe'), attachments: [textFile()] }
+    const id = await expectCreated(await postInbound(request, data))
+    await signInViaApi(request, ADMIN)
+    const before = await listAttachments(request, id)
+    expect(before).toHaveLength(1)
+
+    const again = await postInbound(request, data)
+    expect(again.status()).toBe(200)
+    expect(await again.json()).toEqual({ ticket: { id } })
+
+    expect(await listAttachments(request, id)).toEqual(before)
+  })
+
+  test('a redelivered reply does not duplicate its attachments', async ({ request }) => {
+    const ticket = await createThreadTicket(request, 'attachment-reply-dedupe')
+    const data = { ...replyEmail({ inReplyTo: ticket.messageId }).data, attachments: [textFile()] }
+    const replyId = await expectReplyCreated(await postInbound(request, data), ticket.id)
+
+    const again = await postInbound(request, data)
+    expect(again.status()).toBe(200)
+    expect(await again.json()).toEqual({ ticket: { id: ticket.id }, reply: { id: replyId } })
+
+    await signInViaApi(request, ADMIN)
+    const replies = await listReplies(request, ticket.id)
+    expect(replies).toHaveLength(1)
+    expect(replies[0].attachments).toHaveLength(1)
+    expect(await listAttachments(request, ticket.id)).toEqual([])
+  })
+})
+
+test.describe('POST /api/webhooks/inbound-email: emails without text', () => {
+  test('an attachment-only email creates a ticket with the body (no text)', async ({ request }) => {
+    const id = await expectCreated(await postInbound(request, { ...validEmail(), body: '', attachments: [textFile()] }))
+
+    await signInViaApi(request, ADMIN)
+    const ticket = await getTicket(request, id)
+    expect(ticket.body).toBe('(no text)')
+    expect(ticket.attachments).toHaveLength(1)
+  })
+
+  test('a listed-only file is enough for a blank body too', async ({ request }) => {
+    const id = await expectCreated(
+      await postInbound(request, { ...validEmail(), body: '', attachments: [listedOnlyFile()] }),
+    )
+
+    await signInViaApi(request, ADMIN)
+    expect((await getTicket(request, id)).body).toBe('(no text)')
+  })
+
+  test('an HTML-only email creates a ticket with the body (no text) and keeps the HTML', async ({ request }) => {
+    const bodyHTML = '<p><img src="cid:shot"></p>'
+    const id = await expectCreated(await postInbound(request, { ...validEmail(), body: '   ', bodyHTML }))
+
+    await signInViaApi(request, ADMIN)
+    expect(await getTicket(request, id)).toMatchObject({ body: '(no text)', bodyHTML })
+  })
+
+  test('an attachment-only reply is stored with the body (no text)', async ({ request }) => {
+    const ticket = await createThreadTicket(request, 'attachment-only-reply')
+    const { bodyHTML: _bodyHTML, ...data } = replyEmail({ inReplyTo: ticket.messageId }).data
+    await expectReplyCreated(await postInbound(request, { ...data, body: '', attachments: [textFile()] }), ticket.id)
+
+    await signInViaApi(request, ADMIN)
+    const [reply] = await listReplies(request, ticket.id)
+    expect(reply.body).toBe('(no text)')
+    expect(reply.attachments).toHaveLength(1)
+  })
+
+  const blankBodies: [string, object][] = [
+    ['an empty body', { body: '' }],
+    ['a whitespace body', { body: '   ' }],
+    ['an empty body and an empty attachments list', { body: '', attachments: [] }],
+  ]
+
+  for (const [label, fields] of blankBodies) {
+    test(`400 for ${label} with no HTML, and no ticket is stored`, async ({ request }) => {
+      const subject = `Blank body ${uniqueSuffix()}`
+      const res = await postInbound(request, { ...validEmail(), subject, ...fields })
+      expect(res.status()).toBe(400)
+      expect(await res.json()).toEqual({ error: 'body is required' })
+      await expectNoTicketMatching(request, subject)
+    })
+  }
+
+  test('400 for a missing body key, even with attachments: the key has to be there, if blank', async ({ request }) => {
+    const { body: _body, ...data } = validEmail()
+    const res = await postInbound(request, { ...data, attachments: [textFile()] })
+    expect(res.status()).toBe(400)
+    expect(await res.json()).toEqual({ error: 'body is required' })
+  })
+})
+
+test.describe('POST /api/webhooks/inbound-email: cleaning attachment fields', () => {
+  const filenames: [string, string, string][] = [
+    ['a filename containing NUL is stored cleaned: 201, not 500', 'inv\u0000oice.pdf', 'invoice.pdf'],
+    ['line breaks and other control characters are stripped from a filename', ' in\r\nvoice\u0007\u007f.pdf ', 'invoice.pdf'],
+    ['a filename of only control characters becomes "attachment"', '\u0000\r\n', 'attachment'],
+    ['a filename over 255 characters is cut to 255', 'f'.repeat(300), 'f'.repeat(255)],
+  ]
+
+  for (const [label, filename, stored] of filenames) {
+    test(label, async ({ request }) => {
+      expect(await storedAttachment(request, { ...textFile(), filename })).toMatchObject({ filename: stored })
+    })
+  }
+
+  const contentTypes: [string, string | undefined, string][] = [
+    ['an invalid contentType becomes application/octet-stream', 'not a type', 'application/octet-stream'],
+    ['a contentType containing NUL becomes application/octet-stream', 'text/pl\u0000ain', 'application/octet-stream'],
+    ['a missing contentType becomes application/octet-stream', undefined, 'application/octet-stream'],
+    ['a contentType is stored lower-cased', 'IMAGE/PNG', 'image/png'],
+  ]
+
+  for (const [label, contentType, stored] of contentTypes) {
+    test(label, async ({ request }) => {
+      expect(await storedAttachment(request, { ...textFile(), contentType })).toMatchObject({ contentType: stored })
+    })
+  }
+
+  const contentIds: [string, unknown, string | null][] = [
+    ['an invalid contentId is dropped', 'has a space', null],
+    ['a contentId containing NUL is dropped', 'lo\u0000go', null],
+    ['a contentId that is not a string is dropped', 5, null],
+    ['a valid contentId is stored trimmed', ' <logo@example.com> ', '<logo@example.com>'],
+  ]
+
+  for (const [label, contentId, stored] of contentIds) {
+    test(label, async ({ request }) => {
+      expect(await storedAttachment(request, { ...textFile(), contentId })).toMatchObject({ contentId: stored })
+    })
+  }
+})
+
+test.describe('POST /api/webhooks/inbound-email: attachment limits', () => {
+  test('400 for 21 stored files, and no ticket is stored', async ({ request }) => {
+    await expectRejected(request, Array.from({ length: 21 }, () => textFile()), 'attachments has too many files')
+  })
+
+  test('201 for 20 stored files', async ({ request }) => {
+    const id = await expectCreated(
+      await postInbound(request, { ...validEmail(), attachments: Array.from({ length: 20 }, () => textFile()) }),
+    )
+
+    await signInViaApi(request, ADMIN)
+    expect(await listAttachments(request, id)).toHaveLength(20)
+  })
+
+  test('201 for 20 stored files and 5 listed ones: the limit counts only stored files', async ({ request }) => {
+    const attachments = [
+      ...Array.from({ length: 20 }, () => textFile()),
+      ...Array.from({ length: 5 }, () => listedOnlyFile()),
+    ]
+    const id = await expectCreated(await postInbound(request, { ...validEmail(), attachments }))
+
+    await signInViaApi(request, ADMIN)
+    const listed = await listAttachments(request, id)
+    expect(listed.filter((a) => a.tooLarge)).toHaveLength(5)
+    expect(listed.filter((a) => !a.tooLarge)).toHaveLength(20)
+  })
+
+  test('400 for 101 entries, and no ticket is stored', async ({ request }) => {
+    await expectRejected(request, Array.from({ length: 101 }, () => listedOnlyFile()), 'attachments has too many entries')
+  })
+
+  test('201 for 100 listed entries', async ({ request }) => {
+    const attachments = Array.from({ length: 100 }, () => listedOnlyFile())
+    const id = await expectCreated(await postInbound(request, { ...validEmail(), attachments }))
+
+    await signInViaApi(request, ADMIN)
+    expect(await listAttachments(request, id)).toHaveLength(100)
+  })
+
+  test('400 for a file one byte over 10 MiB, and no ticket is stored', async ({ request }) => {
+    test.slow()
+    await expectRejected(request, [fileOfSize(10 * MiB + 1)], 'attachment is too large')
+  })
+
+  test('201 for a file of exactly 10 MiB', async ({ request }) => {
+    test.slow()
+    const attachment = await storedAttachment(request, fileOfSize(10 * MiB))
+    expect(attachment).toMatchObject({ size: 10 * MiB, tooLarge: false })
+  })
+
+  test('400 for files one byte over 25 MiB in total, each under the file limit, and no ticket is stored', async ({ request }) => {
+    test.slow()
+    const attachments = [fileOfSize(10 * MiB), fileOfSize(10 * MiB), fileOfSize(5 * MiB + 1)]
+    // Under the JSON limit, or this would be the parser's 413 and not the schema's 400.
+    expect(JSON.stringify(attachments).length).toBeLessThan(35 * MiB)
+    await expectRejected(request, attachments, 'attachments are too large')
+  })
+
+  test('201 for files of exactly 25 MiB in total: the JSON limit leaves room for them as base64', async ({ request }) => {
+    test.slow()
+    const attachments = [fileOfSize(10 * MiB), fileOfSize(10 * MiB), fileOfSize(5 * MiB)]
+    const id = await expectCreated(await postInbound(request, { ...validEmail(), attachments }))
+
+    await signInViaApi(request, ADMIN)
+    const listed = await listAttachments(request, id)
+    expect(listed.map((a) => a.size)).toEqual([10 * MiB, 10 * MiB, 5 * MiB])
+  })
+
+  const invalid: [string, unknown, string][] = [
+    ['invalid base64', [{ ...textFile(), content: 'not base64!' }], 'attachment content must be base64'],
+    ['attachments not an array', 'note.txt', 'attachments must be an array'],
+    ['a missing filename', [{ contentType: 'text/plain', size: 1 }], 'attachment filename is required'],
+    ['a missing size', [{ filename: 'note.txt', contentType: 'text/plain' }], 'attachment size must be an integer'],
+    ['a fractional size', [{ ...listedOnlyFile(), size: 1.5 }], 'attachment size must be an integer'],
+  ]
+
+  for (const [label, attachments, error] of invalid) {
+    test(`400 for ${label}, and no ticket is stored`, async ({ request }) => {
+      await expectRejected(request, attachments, error)
+    })
+  }
 })

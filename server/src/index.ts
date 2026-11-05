@@ -31,10 +31,11 @@ app.use("/api/auth", (req, _res, next) => {
 app.all("/api/auth/*splat", toNodeHandler(auth));
 
 // Called by the mail pipeline, not a signed-in user: a shared secret instead of a session.
-// Emails can be larger than the 100 kB default, so the webhooks get their own 1 MB parser
-// (the schema caps body and bodyHTML), after the secret check so only a known caller can
-// send that much. Mounted before the global parser, which then skips these requests.
-app.use("/api/webhooks", requireWebhookSecret, express.json({ limit: "1mb" }), webhookRouter);
+// Emails can be larger than the 100 kB default, so the webhooks get their own parser, after
+// the secret check so only a known caller can send that much. 35 MB holds 25 MiB of attachments
+// as base64, plus the bodies; the schema caps each of those. Mounted before the global parser,
+// which then skips these requests.
+app.use("/api/webhooks", requireWebhookSecret, express.json({ limit: "35mb" }), webhookRouter);
 
 app.use(express.json());
 

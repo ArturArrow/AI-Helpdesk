@@ -3,6 +3,7 @@ import { createReplySchema } from "core/schemas/replies";
 import { ticketIdParamsSchema } from "core/schemas/tickets";
 import { EmailStatus, ReplySender } from "../../generated/prisma/enums";
 import { isAiConfigured, polishReply } from "../lib/ai";
+import { attachmentSelect } from "../lib/attachments";
 import { prisma } from "../lib/db";
 import { isMailerConfigured } from "../lib/env";
 import { queueReplyEmail } from "../lib/queue";
@@ -23,6 +24,7 @@ const replySelect = {
   sentAt: true,
   createdAt: true,
   author: { select: { id: true, name: true } },
+  attachments: { select: attachmentSelect, orderBy: { id: "asc" } },
 } as const;
 
 function ticketExists(id: number) {

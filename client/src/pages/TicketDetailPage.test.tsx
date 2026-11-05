@@ -24,6 +24,7 @@ const ticket = {
   body: 'Hello,\nplease refund my order.',
   bodyHTML: null,
   assignedTo: { id: 'user-2', name: 'Alan Agent' } as { id: string; name: string } | null,
+  attachments: [],
 }
 
 const agents = [
@@ -542,6 +543,7 @@ describe('TicketDetailPage', () => {
         emailStatus: null,
         createdAt: '2026-04-05T08:00:00.000Z',
         author: { id: 'user-2', name: 'Alan Agent' },
+        attachments: [],
       }
       const post = vi.spyOn(axios, 'post').mockResolvedValue({ status: 201, data: { reply } })
       renderAt('/tickets/42')

@@ -1,46 +1,99 @@
 import { z } from "zod";
+import {
+  MAX_ATTACHMENT_BYTES,
+  MAX_EMAIL_ATTACHMENT_BYTES,
+  MAX_STORED_ATTACHMENTS,
+} from "../constants/attachment";
 import { TicketCategory } from "../constants/ticketCategory";
 import { VISIBLE_TICKET_STATUSES } from "../constants/ticketStatus";
+
+// What a stored email says in place of a body when it had only attachments or HTML.
+const NO_TEXT = "(no text)";
+
+// The size of base64 content once decoded, without decoding it.
+function decodedBytes(base64: string) {
+  return (base64.length / 4) * 3 - (base64.match(/=+$/)?.[0].length ?? 0);
+}
+
+// A file from the email. Without content it's one the sender left out for being over the limits:
+// it's listed by name, and only the original email has it. Sender-controlled text is cleaned rather
+// than rejected, so an odd header can't lose the whole email. Control characters go because
+// Postgres text can't hold NUL, and that 500 would have the mailer retry the email forever.
+const inboundAttachmentSchema = z.object({
+  filename: z
+    .string({ error: "attachment filename is required" })
+    .transform((filename) => filename.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 255) || "attachment"),
+  contentType: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/)
+    .max(255)
+    .catch("application/octet-stream"),
+  size: z.int("attachment size must be an integer").min(0).max(2_147_483_647),
+  // Printable ASCII, as in the header it comes from; a bad one only leaves an inline image broken.
+  contentId: z.string().trim().regex(/^[\x21-\x7e]+$/).max(998).optional().catch(undefined),
+  content: z.base64("attachment content must be base64").optional(),
+});
 
 // Body of POST /api/webhooks/inbound-email. Provider-neutral: a SendGrid/Mailgun adapter
 // (or a forwarding script) maps its own format onto this.
 // 998 is the RFC 5322 line-length limit for a header; 254 the RFC 5321 limit for an address.
-// The body caps stop abuse; the webhook's own 1 MB JSON limit leaves room for both.
-export const inboundEmailSchema = z.object({
-  senderEmail: z
-    .string({ error: "senderEmail is required" })
-    .trim()
-    .toLowerCase()
-    .max(254, "senderEmail is too long")
-    .pipe(z.email("senderEmail must be a valid email address")),
-  senderName: z
-    .string({ error: "senderName is required" })
-    .trim()
-    .min(1, "senderName is required")
-    .max(998, "senderName is too long"),
-  subject: z
-    .string()
-    .trim()
-    .max(998, "subject is too long")
-    .optional()
-    .transform((subject) => subject || "(no subject)"),
-  body: z
-    .string({ error: "body is required" })
-    .trim()
-    .min(1, "body is required")
-    .max(50_000, "body is too long"),
-  bodyHTML: z.string().max(100_000, "bodyHTML is too long").optional(),
-  messageId: z.string().trim().min(1).max(998, "messageId is too long").optional(),
-  // Threading headers: In-Reply-To and the Message-IDs listed in References. An email that
-  // points at a known ticket or customer reply is stored as a reply on that ticket.
-  inReplyTo: z.string().trim().min(1).max(998, "inReplyTo is too long").optional(),
-  references: z
-    .array(z.string().trim().min(1).max(998, "references entry is too long"), {
-      error: "references must be an array of Message-IDs",
-    })
-    .max(100, "references has too many entries")
-    .optional(),
-});
+// The body caps stop abuse; the webhook's own JSON limit leaves room for them and the attachments.
+export const inboundEmailSchema = z
+  .object({
+    senderEmail: z
+      .string({ error: "senderEmail is required" })
+      .trim()
+      .toLowerCase()
+      .max(254, "senderEmail is too long")
+      .pipe(z.email("senderEmail must be a valid email address")),
+    senderName: z
+      .string({ error: "senderName is required" })
+      .trim()
+      .min(1, "senderName is required")
+      .max(998, "senderName is too long"),
+    subject: z
+      .string()
+      .trim()
+      .max(998, "subject is too long")
+      .optional()
+      .transform((subject) => subject || "(no subject)"),
+    // May be blank when the email has attachments or HTML, which the checks below decide.
+    body: z.string({ error: "body is required" }).trim().max(50_000, "body is too long"),
+    bodyHTML: z.string().max(100_000, "bodyHTML is too long").optional(),
+    messageId: z.string().trim().min(1).max(998, "messageId is too long").optional(),
+    // Threading headers: In-Reply-To and the Message-IDs listed in References. An email that
+    // points at a known ticket or customer reply is stored as a reply on that ticket.
+    inReplyTo: z.string().trim().min(1).max(998, "inReplyTo is too long").optional(),
+    references: z
+      .array(z.string().trim().min(1).max(998, "references entry is too long"), {
+        error: "references must be an array of Message-IDs",
+      })
+      .max(100, "references has too many entries")
+      .optional(),
+    attachments: z
+      .array(inboundAttachmentSchema, { error: "attachments must be an array" })
+      .max(100, "attachments has too many entries")
+      .optional(),
+  })
+  .superRefine(({ body, bodyHTML, attachments = [] }, ctx) => {
+    // A file or a pasted screenshot on its own is a real email, though it has no text.
+    if (!body && !bodyHTML && attachments.length === 0) {
+      ctx.addIssue({ code: "custom", path: ["body"], message: "body is required" });
+    }
+    const stored = attachments.flatMap(({ content }) => (content === undefined ? [] : [decodedBytes(content)]));
+    if (stored.length > MAX_STORED_ATTACHMENTS) {
+      ctx.addIssue({ code: "custom", path: ["attachments"], message: "attachments has too many files" });
+    }
+    if (stored.some((bytes) => bytes > MAX_ATTACHMENT_BYTES)) {
+      ctx.addIssue({ code: "custom", path: ["attachments"], message: "attachment is too large" });
+    }
+    if (stored.reduce((total, bytes) => total + bytes, 0) > MAX_EMAIL_ATTACHMENT_BYTES) {
+      ctx.addIssue({ code: "custom", path: ["attachments"], message: "attachments are too large" });
+    }
+  })
+  .transform((email) => ({ ...email, body: email.body || NO_TEXT }));
 
 export type InboundEmailInput = z.input<typeof inboundEmailSchema>;
 
@@ -130,6 +183,15 @@ export const ticketIdParamsSchema = z.object({
     .int("id must be a positive integer")
     .min(1, "id must be a positive integer")
     .max(2_147_483_647, "id must be a positive integer"),
+});
+
+// Params of GET /api/tickets/:id/attachments/:attachmentId.
+export const attachmentParamsSchema = ticketIdParamsSchema.extend({
+  attachmentId: z.coerce
+    .number({ error: "attachmentId must be a positive integer" })
+    .int("attachmentId must be a positive integer")
+    .min(1, "attachmentId must be a positive integer")
+    .max(2_147_483_647, "attachmentId must be a positive integer"),
 });
 
 // Body of PATCH /api/tickets/:id. Each field is optional, but at least one must be given;

@@ -1,8 +1,10 @@
 import { act, screen, within } from '@testing-library/react'
 import axios from 'axios'
 import { EmailStatus } from 'core/constants/emailStatus'
+import type { Attachment } from 'core/constants/attachment'
 import { ReplySender } from 'core/constants/replySender'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { listedFiles, report, screenshot } from '@/test/attachments.ts'
 import { httpError } from '@/test/http.ts'
 import { renderWithQuery } from '@/test/render.tsx'
 import ReplyThread, { type Reply } from './ReplyThread.tsx'
@@ -16,6 +18,7 @@ const replies: Reply[] = [
     emailStatus: null,
     createdAt: '2026-04-04T09:30:00.000Z',
     author: null,
+    attachments: [],
   },
   {
     id: 2,
@@ -25,6 +28,7 @@ const replies: Reply[] = [
     emailStatus: EmailStatus.sent,
     createdAt: '2026-04-04T10:05:00.000Z',
     author: { id: 'user-2', name: 'Alan Agent' },
+    attachments: [],
   },
   {
     id: 3,
@@ -34,6 +38,7 @@ const replies: Reply[] = [
     emailStatus: null,
     createdAt: '2026-04-04T11:45:00.000Z',
     author: null,
+    attachments: [],
   },
 ]
 
@@ -101,6 +106,7 @@ describe('ReplyThread', () => {
       emailStatus: EmailStatus.sent,
       createdAt: '2026-04-04T12:00:00.000Z',
       author: null,
+      attachments: [],
     }
     mockGet().mockResolvedValue({ data: { replies: [aiReply] } })
     renderWithQuery(<ReplyThread ticket={{ id: 42 }} />)
@@ -201,6 +207,96 @@ describe('ReplyThread', () => {
       expect(within(item).getByText('Plain fallback')).toBeInTheDocument()
     })
   })
+  describe('attachments', () => {
+    const screenshotUrl = '/api/tickets/42/attachments/7'
+    const inlineImage = '<p>See this</p><img src="cid:shot@x" alt="Screenshot">'
+
+    // One customer reply as the only item in the thread. Its file list is a list too, so the reply
+    // is awaited by its label rather than by role.
+    async function renderReply(bodyHTML: string | null, attachments: Attachment[]) {
+      mockGet().mockResolvedValue({ data: { replies: [{ ...replies[0], bodyHTML, attachments }] } })
+      renderWithQuery(<ReplyThread ticket={{ id: 42 }} />)
+      await within(thread()).findByText('Customer')
+    }
+
+    it("links a reply's files under the ticket's id, not the reply's", async () => {
+      await renderReply(null, [report])
+
+      expect(screen.getByRole('link', { name: 'report.pdf' })).toHaveAttribute(
+        'href',
+        '/api/tickets/42/attachments/8',
+      )
+    })
+
+    it('shows no attachment list for a reply without files', async () => {
+      await renderReply(inlineImage, [])
+
+      expect(screen.queryByRole('list', { name: 'Attachments' })).not.toBeInTheDocument()
+    })
+
+    it('lists every file under a plain-text reply, inline images included', async () => {
+      await renderReply(null, [screenshot, report])
+
+      expect(screen.getByText(replies[0].body)).toBeInTheDocument()
+      expect(listedFiles()).toEqual(['shot.png (2 KB)', 'report.pdf (512 B)'])
+    })
+
+    it("points a cid image at its URL under the ticket's id and leaves it out of the list", async () => {
+      await renderReply(inlineImage, [screenshot, report])
+
+      expect(screen.getByRole('img', { name: 'Screenshot' })).toHaveAttribute('src', screenshotUrl)
+      expect(listedFiles()).toEqual(['report.pdf (512 B)'])
+    })
+
+    it('matches a URL-encoded cid', async () => {
+      await renderReply('<img src="cid:shot%40x" alt="Screenshot">', [screenshot, report])
+
+      expect(screen.getByRole('img', { name: 'Screenshot' })).toHaveAttribute('src', screenshotUrl)
+      expect(listedFiles()).toEqual(['report.pdf (512 B)'])
+    })
+
+    it('leaves an unmatched cid as it is and keeps the file in the list', async () => {
+      await renderReply('<img src="cid:other@x" alt="Screenshot">', [screenshot])
+
+      expect(screen.getByRole('img', { name: 'Screenshot' })).toHaveAttribute('src', 'cid:other@x')
+      expect(listedFiles()).toEqual(['shot.png (2 KB)'])
+    })
+
+    it('does not embed an SVG, and keeps it in the list as a download', async () => {
+      await renderReply(inlineImage, [{ ...screenshot, filename: 'logo.svg', contentType: 'image/svg+xml' }])
+
+      expect(screen.getByRole('img', { name: 'Screenshot' })).toHaveAttribute('src', 'cid:shot@x')
+      expect(listedFiles()).toEqual(['logo.svg (2 KB)'])
+      expect(screen.getByRole('link', { name: 'logo.svg' })).toHaveAttribute('href', screenshotUrl)
+    })
+
+    it('does not embed an image that was too large, and keeps it in the list', async () => {
+      await renderReply(inlineImage, [{ ...screenshot, tooLarge: true }])
+
+      expect(screen.getByRole('img', { name: 'Screenshot' })).toHaveAttribute('src', 'cid:shot@x')
+      expect(listedFiles()).toEqual(['shot.png (2 KB, too large, not stored)'])
+      expect(screen.queryByRole('link', { name: 'shot.png' })).not.toBeInTheDocument()
+    })
+
+    it('still strips scripts and event handlers from HTML with a cid image', async () => {
+      await renderReply(
+        '<p>Before</p>' +
+          '<script>window.pwned = true</script>' +
+          '<img src="cid:shot@x" alt="Screenshot" onerror="window.pwned = true">',
+        [screenshot],
+      )
+
+      expect(within(thread()).getByText('Before')).toBeInTheDocument()
+      // A script element has no role or text to find it by, so this needs a tag query.
+      expect(thread().querySelector('script')).toBeNull()
+      expect(thread().textContent).not.toContain('pwned')
+
+      const img = screen.getByRole('img', { name: 'Screenshot' })
+      expect(img).toHaveAttribute('src', screenshotUrl)
+      expect(img).not.toHaveAttribute('onerror')
+    })
+  })
+
   describe('email status', () => {
     // One agent reply with the given email status, as the only item in the thread.
     async function renderReply(emailStatus: EmailStatus | null) {

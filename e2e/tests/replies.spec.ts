@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 import { ADMIN, AGENT, signInViaApi, type Credentials } from '../fixtures/auth.js'
-import { addAiReplyInDb, createTicketViaWebhook } from '../fixtures/tickets.js'
+import { addAiReplyInDb, createTicketViaWebhook, fileAttachment } from '../fixtures/tickets.js'
 import { AI_AGENT, createUserViaApi, deleteUserViaApi } from '../fixtures/users.js'
 
 // GET and POST /api/tickets/:id/replies, at the API only (the thread and the form are covered
@@ -16,9 +16,10 @@ type Reply = {
   sentAt: string | null
   createdAt: string
   author: { id: string; name: string } | null
+  attachments: unknown[]
 }
 
-const REPLY_KEYS = ['author', 'body', 'bodyHTML', 'createdAt', 'emailStatus', 'id', 'sender', 'sentAt']
+const REPLY_KEYS = ['attachments', 'author', 'body', 'bodyHTML', 'createdAt', 'emailStatus', 'id', 'sender', 'sentAt']
 const TICKET_ID_ERROR = 'id must be a positive integer'
 const EMPTY_ERROR = "Reply can't be empty"
 const TOO_LONG_ERROR = 'Reply is too long'
@@ -116,6 +117,22 @@ test.describe('POST /api/tickets/:id/replies', () => {
     expect(reply).toMatchObject({ body: 'Spoofed?', sender: 'agent', author: { id: agentId, name: AGENT.name } })
 
     expect(await listReplies(request, ticket.id)).toEqual([reply])
+  })
+
+  // Files only come in through the webhook; a customer reply's are checked in webhook.spec.ts.
+  test('attachments sent in the POST body are ignored: the reply has none in the 201 or the GET list', async ({ request }) => {
+    const ticket = await createTicketViaWebhook(request, 'reply-attachments')
+    await signInViaApi(request, AGENT)
+
+    const res = await request.post(`/api/tickets/${ticket.id}/replies`, {
+      data: { body: 'With a file?', attachments: [fileAttachment('note.txt', 'text/plain', Buffer.from('hello'))] },
+    })
+    expect(res.status()).toBe(201)
+    const { reply } = await res.json()
+    expect(reply).toHaveProperty('attachments', [])
+
+    const [listed] = await listReplies(request, ticket.id)
+    expect(listed).toEqual(reply)
   })
 
   test('an agent reply has bodyHTML null in the 201 and in the GET list', async ({ request }) => {
@@ -277,6 +294,7 @@ test.describe('GET /api/tickets/:id/replies', () => {
         sentAt: null,
         createdAt: expect.any(String),
         author: { id: AI_AGENT.id, name: AI_AGENT.name },
+        attachments: [],
       },
     ])
     expect(Number.isNaN(Date.parse(replies[1].createdAt))).toBe(false)

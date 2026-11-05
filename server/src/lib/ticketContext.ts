@@ -10,6 +10,7 @@ export async function loadTicketContext(id: number): Promise<TicketContext | nul
       subject: true,
       body: true,
       senderName: true,
+      attachments: { select: { filename: true }, orderBy: { id: "asc" } },
       // The latest replies, newest first; reversed below to read oldest first.
       replies: {
         select: { body: true, sender: true },
@@ -18,5 +19,11 @@ export async function loadTicketContext(id: number): Promise<TicketContext | nul
       },
     },
   });
-  return ticket && { ...ticket, replies: ticket.replies.reverse() };
+  return (
+    ticket && {
+      ...ticket,
+      attachments: ticket.attachments.map(({ filename }) => filename),
+      replies: ticket.replies.reverse(),
+    }
+  );
 }

@@ -1,6 +1,15 @@
-import { expect, test, type APIRequestContext } from '@playwright/test'
+import { expect, test, type APIRequestContext, type APIResponse } from '@playwright/test'
 import { ADMIN, AGENT, signInViaApi } from '../fixtures/auth.js'
-import { createTicketViaWebhook, setTicketInDb, setTicketStatusInDb, updateTicketViaApi, type TicketUpdate } from '../fixtures/tickets.js'
+import {
+  createTicketViaWebhook,
+  fileAttachment,
+  setTicketInDb,
+  setTicketStatusInDb,
+  updateTicketViaApi,
+  type InboundAttachment,
+  type ListedAttachment,
+  type TicketUpdate,
+} from '../fixtures/tickets.js'
 import { AI_AGENT, createUserViaApi, deleteUserViaApi, uniqueSuffix } from '../fixtures/users.js'
 import { inboundSecret } from '../fixtures/webhook.js'
 
@@ -664,7 +673,7 @@ test.describe('GET /api/tickets pagination (page, pageSize)', () => {
 })
 
 const TICKET_ID_ERROR = 'id must be a positive integer'
-const DETAIL_KEYS = ['assignedTo', 'body', 'bodyHTML', 'category', 'createdAt', 'id', 'senderEmail', 'senderName', 'status', 'subject', 'updatedAt']
+const DETAIL_KEYS = ['assignedTo', 'attachments', 'body', 'bodyHTML', 'category', 'createdAt', 'id', 'senderEmail', 'senderName', 'status', 'subject', 'updatedAt']
 
 test.describe('GET /api/tickets/:id', () => {
   test('401 without a session, for an existing and an invalid id', async ({ request }) => {
@@ -740,6 +749,7 @@ test.describe('GET /api/tickets/:id', () => {
       body: 'Plain body',
       bodyHTML: '<p>HTML body</p>',
       assignedTo: null,
+      attachments: [],
     })
     expect(body.ticket).not.toHaveProperty('messageId')
     expect(body.ticket).not.toHaveProperty('assignedToId')
@@ -1050,6 +1060,7 @@ type TicketDetail = {
   category: string | null
   assignedTo: { id: string; name: string } | null
   updatedAt: string
+  attachments: ListedAttachment[]
 }
 
 // GETs /api/tickets/:id, asserts 200 and returns the ticket.
@@ -1336,4 +1347,221 @@ test.describe('POST /api/tickets/:id/summary', () => {
     expect(res.status()).toBe(404)
     expect(await res.json()).toEqual({ error: 'Ticket not found' })
   })
+})
+
+// What a ticket's detail lists is checked in webhook.spec.ts, next to what was sent.
+test.describe('GET /api/tickets/:id/attachments/:attachmentId', () => {
+  const ALL_BYTE_VALUES = Buffer.from(Array.from({ length: 256 }, (_, byte) => byte))
+  const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+  const ID_ERROR = 'id must be a positive integer'
+  const ATTACHMENT_ID_ERROR = 'attachmentId must be a positive integer'
+  const NOT_FOUND = { error: 'Attachment not found' }
+  // Postgres int4's maximum: a valid id that no row in the test DB reaches.
+  const MISSING_ID = 2147483647
+
+  const downloadPath = (ticketId: number | string, attachmentId: number | string) =>
+    `/api/tickets/${ticketId}/attachments/${attachmentId}`
+
+  // A ticket with one file, and that file as listed. `request` must be signed in.
+  async function createTicketWithFile(request: APIRequestContext, file: InboundAttachment) {
+    const { id } = await createTicketViaWebhook(request, 'attachment', { attachments: [file] })
+    const { attachments } = await getTicket(request, id)
+    expect(attachments).toHaveLength(1)
+    return { ticketId: id, attachment: attachments[0] }
+  }
+
+  // Creates a ticket with the file and downloads it, asserting 200. `request` must be signed in.
+  async function download(request: APIRequestContext, file: InboundAttachment) {
+    const { ticketId, attachment } = await createTicketWithFile(request, file)
+    const res = await request.get(downloadPath(ticketId, attachment.id))
+    expect(res.status(), `download ${file.filename}`).toBe(200)
+    return res
+  }
+
+  function expectSafeHeaders(res: APIResponse) {
+    const headers = res.headers()
+    expect(headers['content-disposition']).toMatch(/^attachment;/)
+    expect(headers['x-content-type-options']).toBe('nosniff')
+    expect(headers['content-security-policy']).toBe('sandbox')
+    expect(headers['cache-control']).toBe('private')
+  }
+
+  test('401 without a session, for an existing file and for a bad id', async ({ request, playwright, baseURL }) => {
+    await signInViaApi(request, AGENT)
+    const { ticketId, attachment } = await createTicketWithFile(
+      request,
+      fileAttachment('secret.txt', 'text/plain', Buffer.from('secret')),
+    )
+
+    const signedOut = await playwright.request.newContext({ baseURL })
+    for (const path of [downloadPath(ticketId, attachment.id), downloadPath('abc', 'abc')]) {
+      const res = await signedOut.get(path)
+      expect(res.status(), path).toBe(401)
+      expect(await res.json()).toEqual({ error: 'Unauthorized' })
+    }
+    await signedOut.dispose()
+  })
+
+  for (const user of [AGENT, ADMIN]) {
+    test(`the ${user.name.toLowerCase()} downloads the exact bytes, every byte value included`, async ({ request }) => {
+      await signInViaApi(request, user)
+      const res = await download(request, fileAttachment('bytes.bin', 'application/octet-stream', ALL_BYTE_VALUES))
+      expect(await res.body()).toEqual(ALL_BYTE_VALUES)
+    })
+  }
+
+  test('an empty file downloads as an empty body, not a 404', async ({ request }) => {
+    await signInViaApi(request, AGENT)
+    const res = await download(request, fileAttachment('empty.txt', 'text/plain', Buffer.alloc(0)))
+    expect(await res.body()).toHaveLength(0)
+  })
+
+  test("a customer reply's file downloads through its ticket", async ({ request }) => {
+    await signInViaApi(request, AGENT)
+    const messageId = `<attachment-${uniqueSuffix()}@example.com>`
+    const ticket = await createTicketViaWebhook(request, 'attachment-reply', { messageId })
+    const posted = await request.post('/api/webhooks/inbound-email', {
+      headers: { 'X-Inbound-Secret': inboundSecret() },
+      data: {
+        senderEmail: ticket.senderEmail,
+        senderName: ticket.senderName,
+        body: 'See attached.',
+        inReplyTo: messageId,
+        attachments: [fileAttachment('reply.bin', 'application/octet-stream', ALL_BYTE_VALUES)],
+      },
+    })
+    expect(posted.status()).toBe(201)
+    const { replies } = await (await request.get(`/api/tickets/${ticket.id}/replies`)).json()
+
+    const res = await request.get(downloadPath(ticket.id, replies[0].attachments[0].id))
+    expect(res.status()).toBe(200)
+    expect(await res.body()).toEqual(ALL_BYTE_VALUES)
+  })
+
+  test('a plain filename is in Content-Disposition as it is', async ({ request }) => {
+    await signInViaApi(request, AGENT)
+    const res = await download(request, fileAttachment('report.pdf', 'application/pdf', Buffer.from('%PDF-1.7')))
+    expect(res.headers()['content-disposition']).toMatch(/^attachment; filename="?report\.pdf"?$/)
+  })
+
+  test('a non-ASCII filename is listed as sent and percent-encoded in Content-Disposition', async ({ request }) => {
+    await signInViaApi(request, AGENT)
+    const filename = 'zażółć 日本語.txt'
+    const { ticketId, attachment } = await createTicketWithFile(
+      request,
+      fileAttachment(filename, 'text/plain', Buffer.from('hello')),
+    )
+    expect(attachment.filename).toBe(filename)
+
+    const res = await request.get(downloadPath(ticketId, attachment.id))
+    expect(res.status()).toBe(200)
+    expect(res.headers()['content-disposition']).toContain(`filename*=UTF-8''${encodeURIComponent(filename)}`)
+  })
+
+  const unsafeFiles = [
+    ['page.html', 'text/html', '<script>alert(1)</script>'],
+    ['drawing.svg', 'image/svg+xml', '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>'],
+    ['note.txt', 'text/plain', 'plain text'],
+  ] as const
+
+  for (const [filename, contentType, text] of unsafeFiles) {
+    test(`${filename} keeps its listed type but downloads as application/octet-stream, with the safe headers`, async ({ request }) => {
+      await signInViaApi(request, AGENT)
+      const bytes = Buffer.from(text)
+      const { ticketId, attachment } = await createTicketWithFile(request, fileAttachment(filename, contentType, bytes))
+      expect(attachment.contentType).toBe(contentType)
+
+      const res = await request.get(downloadPath(ticketId, attachment.id))
+      expect(res.status()).toBe(200)
+      expect(res.headers()['content-type']).toBe('application/octet-stream')
+      expectSafeHeaders(res)
+      expect(await res.body()).toEqual(bytes)
+    })
+  }
+
+  for (const contentType of ['image/png', 'image/jpeg', 'image/gif', 'image/webp']) {
+    test(`${contentType} keeps its type, still as an attachment with the safe headers`, async ({ request }) => {
+      await signInViaApi(request, AGENT)
+      const res = await download(request, fileAttachment('image', contentType, PNG_SIGNATURE))
+      expect(res.headers()['content-type']).toBe(contentType)
+      expectSafeHeaders(res)
+      expect(await res.body()).toEqual(PNG_SIGNATURE)
+    })
+  }
+
+  test("a PATCH response lists the ticket's files too", async ({ request }) => {
+    await signInViaApi(request, AGENT)
+    const { ticketId, attachment } = await createTicketWithFile(
+      request,
+      fileAttachment('note.txt', 'text/plain', Buffer.from('hello')),
+    )
+
+    const updated = await updateTicketViaApi(request, ticketId, { status: 'resolved' })
+    expect(updated.attachments).toEqual([attachment])
+  })
+
+  test('404 for an unknown attachment id', async ({ request }) => {
+    await signInViaApi(request, AGENT)
+    const ticket = await createTicketViaWebhook(request, 'attachment-unknown')
+
+    const res = await request.get(downloadPath(ticket.id, MISSING_ID))
+    expect(res.status()).toBe(404)
+    expect(await res.json()).toEqual(NOT_FOUND)
+  })
+
+  test('404 for an unknown ticket id with a real attachment id', async ({ request }) => {
+    await signInViaApi(request, AGENT)
+    const { attachment } = await createTicketWithFile(
+      request,
+      fileAttachment('note.txt', 'text/plain', Buffer.from('hello')),
+    )
+
+    const res = await request.get(downloadPath(MISSING_ID, attachment.id))
+    expect(res.status()).toBe(404)
+    expect(await res.json()).toEqual(NOT_FOUND)
+  })
+
+  test("404 for another ticket's attachment", async ({ request }) => {
+    await signInViaApi(request, AGENT)
+    const other = await createTicketViaWebhook(request, 'attachment-other')
+    const { ticketId, attachment } = await createTicketWithFile(
+      request,
+      fileAttachment('note.txt', 'text/plain', Buffer.from('hello')),
+    )
+
+    const res = await request.get(downloadPath(other.id, attachment.id))
+    expect(res.status()).toBe(404)
+    expect(await res.json()).toEqual(NOT_FOUND)
+    expect((await request.get(downloadPath(ticketId, attachment.id))).status(), 'through its own ticket').toBe(200)
+  })
+
+  test('404 for a tooLarge file, which is listed but has no bytes', async ({ request }) => {
+    await signInViaApi(request, AGENT)
+    const { ticketId, attachment } = await createTicketWithFile(request, {
+      filename: 'video.mp4',
+      contentType: 'video/mp4',
+      size: 50_000_000,
+    })
+    expect(attachment.tooLarge).toBe(true)
+
+    const res = await request.get(downloadPath(ticketId, attachment.id))
+    expect(res.status()).toBe(404)
+    expect(await res.json()).toEqual(NOT_FOUND)
+  })
+
+  for (const id of ['abc', '0', '-1', '1.5', '2147483648']) {
+    test(`400 for ticket id ${id}`, async ({ request }) => {
+      await signInViaApi(request, AGENT)
+      const res = await request.get(downloadPath(id, 1))
+      expect(res.status()).toBe(400)
+      expect(await res.json()).toEqual({ error: ID_ERROR })
+    })
+
+    test(`400 for attachment id ${id}`, async ({ request }) => {
+      await signInViaApi(request, AGENT)
+      const res = await request.get(downloadPath(1, id))
+      expect(res.status()).toBe(400)
+      expect(await res.json()).toEqual({ error: ATTACHMENT_ID_ERROR })
+    })
+  }
 })

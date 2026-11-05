@@ -123,6 +123,7 @@ model Ticket {
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
   replies      Reply[]
+  attachments  Attachment[]
 
   @@index([status])
   @@index([assignedToId])
@@ -164,7 +165,33 @@ model Reply {
   authorId    String?
   author      User?        @relation(fields: [authorId], references: [id])
   createdAt   DateTime     @default(now())
+  attachments Attachment[]
 
   @@index([ticketId, createdAt])
   @@map("reply")
+}
+
+// A file that came with a customer's email.
+model Attachment {
+  id          Int      @id @default(autoincrement())
+  ticketId    Int
+  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  // The customer reply it came with; null when it came with the ticket's own email.
+  replyId     Int?
+  reply       Reply?   @relation(fields: [replyId], references: [id], onDelete: Cascade)
+  filename    String
+  contentType String
+  size        Int
+  // The Content-ID that an inline image's cid: link in the email's HTML points at.
+  contentId   String?
+  // Over the size limits: listed by name, but only the original email in the mailbox has the file.
+  // Its own column because Prisma can't test data for null without reading the bytes.
+  tooLarge    Boolean  @default(false)
+  // Null when tooLarge. Only the download route reads it: select attachmentSelect everywhere else.
+  data        Bytes?
+  createdAt   DateTime @default(now())
+
+  @@index([ticketId])
+  @@index([replyId])
+  @@map("attachment")
 }

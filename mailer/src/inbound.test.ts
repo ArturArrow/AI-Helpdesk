@@ -4,6 +4,8 @@ import { testEnv } from "./testEnv";
 
 mock.module("./env", () => testEnv);
 const { forward, toInboundEmail } = await import("./inbound");
+const { inboundEmailSchema } = await import("core/schemas/tickets");
+const { MAX_ATTACHMENT_BYTES, MAX_STORED_ATTACHMENTS } = await import("core/constants/attachment");
 
 function raw(headers: string[], body: string, contentType = "text/plain; charset=utf-8") {
   return [...headers, `Content-Type: ${contentType}`, "", body].join("\r\n");
@@ -63,6 +65,113 @@ describe("toInboundEmail", () => {
   it("sends a blank sender when From is missing, for the webhook to reject", async () => {
     const email = toInboundEmail(await parse(raw(["Subject: no sender"], "Hi")));
     expect(email.senderEmail).toBe("");
+  });
+});
+
+// A multipart email whose parts are given as header lines and a body.
+function multipart(subtype: string, parts: { headers: string[]; body: string }[]) {
+  const lines = ["From: a@example.com", "MIME-Version: 1.0", `Content-Type: multipart/${subtype}; boundary=X`, ""];
+  for (const { headers, body } of parts) lines.push("--X", ...headers, "", body);
+  return [...lines, "--X--", ""].join("\r\n");
+}
+
+function filePart(filename: string, bytes: Buffer, contentType = "application/pdf") {
+  return {
+    headers: [
+      `Content-Type: ${contentType}`,
+      `Content-Disposition: attachment; filename="${filename}"`,
+      "Content-Transfer-Encoding: base64",
+    ],
+    body: bytes.toString("base64"),
+  };
+}
+
+const textPart = { headers: ["Content-Type: text/plain; charset=utf-8"], body: "See attached." };
+
+describe("toInboundEmail attachments", () => {
+  it("leaves attachments out when the email has none", async () => {
+    const email = toInboundEmail(await parse(raw(["From: a@example.com"], "Hi")));
+    expect(email.attachments).toBeUndefined();
+  });
+
+  it("sends a file's name, type, size and content", async () => {
+    const pdf = Buffer.from("%PDF-1.7");
+    const email = toInboundEmail(await parse(multipart("mixed", [textPart, filePart("invoice.pdf", pdf)])));
+    expect(email.attachments).toEqual([
+      {
+        filename: "invoice.pdf",
+        contentType: "application/pdf",
+        size: pdf.length,
+        contentId: undefined,
+        content: pdf.toString("base64"),
+      },
+    ]);
+  });
+
+  it("keeps an inline image's cid, which the HTML still links to", async () => {
+    const email = toInboundEmail(
+      await parse(
+        multipart("related", [
+          { headers: ["Content-Type: text/html; charset=utf-8"], body: '<p><img src="cid:shot@x"></p>' },
+          {
+            headers: [
+              "Content-Type: image/png",
+              "Content-ID: <shot@x>",
+              "Content-Disposition: inline; filename=shot.png",
+              "Content-Transfer-Encoding: base64",
+            ],
+            body: Buffer.from("png").toString("base64"),
+          },
+        ]),
+      ),
+    );
+    expect(email.bodyHTML).toContain("cid:shot@x");
+    expect(email.attachments?.[0]?.contentId).toBe("shot@x");
+  });
+
+  it("names a part that has no filename", async () => {
+    const nameless = {
+      headers: ["Content-Type: application/octet-stream", "Content-Transfer-Encoding: base64"],
+      body: Buffer.from("data").toString("base64"),
+    };
+    const email = toInboundEmail(await parse(multipart("mixed", [textPart, nameless])));
+    expect(email.attachments?.[0]?.filename).toBe("attachment");
+  });
+
+  it("produces a body the webhook accepts for an email with only a file", async () => {
+    const email = toInboundEmail(await parse(multipart("mixed", [filePart("scan.pdf", Buffer.from("pdf"))])));
+    expect(email.body).toBe("");
+    expect(inboundEmailSchema.parse(email).body).toBe("(no text)");
+  });
+
+  it("sends a file over the per-file limit without content, and keeps the ones after it", async () => {
+    const big = Buffer.alloc(MAX_ATTACHMENT_BYTES + 1);
+    const email = toInboundEmail(
+      await parse(multipart("mixed", [textPart, filePart("big.zip", big), filePart("small.pdf", Buffer.from("ok"))])),
+    );
+    expect(email.attachments?.map(({ filename, content }) => [filename, content !== undefined])).toEqual([
+      ["big.zip", false],
+      ["small.pdf", true],
+    ]);
+    expect(email.attachments?.[0]?.size).toBe(big.length);
+    expect(inboundEmailSchema.safeParse(email).success).toBe(true);
+  });
+
+  it("stops storing once the email's total limit is reached, and the webhook accepts the result", async () => {
+    const part = Buffer.alloc(MAX_ATTACHMENT_BYTES);
+    const email = toInboundEmail(
+      await parse(multipart("mixed", ["a", "b", "c"].map((name) => filePart(`${name}.bin`, part)))),
+    );
+    expect(email.attachments?.map(({ content }) => content !== undefined)).toEqual([true, true, false]);
+    expect(inboundEmailSchema.safeParse(email).success).toBe(true);
+  });
+
+  it("stops storing after the file count limit, and the webhook accepts the result", async () => {
+    const files = Array.from({ length: MAX_STORED_ATTACHMENTS + 1 }, (_, i) => filePart(`${i}.txt`, Buffer.from("x")));
+    const email = toInboundEmail(await parse(multipart("mixed", files)));
+    expect(email.attachments?.filter(({ content }) => content !== undefined)).toHaveLength(MAX_STORED_ATTACHMENTS);
+    expect(email.attachments).toHaveLength(MAX_STORED_ATTACHMENTS + 1);
+    expect(inboundEmailSchema.safeParse(email).success).toBe(true);
   });
 });
 

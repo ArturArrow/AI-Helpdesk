@@ -1,14 +1,19 @@
-import DOMPurify from 'dompurify'
 import type { TicketDetailData } from 'core/constants/ticket'
+import AttachmentList from '@/components/AttachmentList.tsx'
 import { Card, CardContent } from '@/components/ui/card.tsx'
+import { emailContent } from '@/lib/emailHtml.ts'
 
 type TicketDetailProps = {
-  ticket: Pick<TicketDetailData, 'senderName' | 'senderEmail' | 'createdAt' | 'body' | 'bodyHTML' | 'updatedAt'>
+  ticket: Pick<
+    TicketDetailData,
+    'id' | 'senderName' | 'senderEmail' | 'createdAt' | 'body' | 'bodyHTML' | 'updatedAt' | 'attachments'
+  >
 }
 
-// The sender, timestamps and body of a ticket: the HTML body when there is one, otherwise the plain text.
-// The HTML comes from the sender, so it is always sanitized before it is rendered.
+// The sender, timestamps, body and files of a ticket: the HTML body when there is one, otherwise the
+// plain text. emailContent sanitizes the HTML, which comes from the sender.
 function TicketDetail({ ticket }: TicketDetailProps) {
+  const { html, listed } = emailContent(ticket.bodyHTML, ticket.id, ticket.attachments)
   return (
     <>
       <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
@@ -28,14 +33,12 @@ function TicketDetail({ ticket }: TicketDetailProps) {
         </div>
       </dl>
       <Card>
-        {ticket.bodyHTML ? (
-          <CardContent
-            className="text-sm wrap-break-word"
-            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(ticket.bodyHTML) }}
-          />
+        {html ? (
+          <CardContent className="text-sm wrap-break-word" dangerouslySetInnerHTML={{ __html: html }} />
         ) : (
           <CardContent className="text-sm wrap-break-word whitespace-pre-wrap">{ticket.body}</CardContent>
         )}
+        <AttachmentList ticketId={ticket.id} attachments={listed} />
       </Card>
     </>
   )
