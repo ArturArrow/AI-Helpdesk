@@ -553,7 +553,8 @@ describe('TicketDetailPage', () => {
       await user.type(screen.getByRole('textbox', { name: 'Reply' }), reply.body)
       await user.click(screen.getByRole('button', { name: 'Send reply' }))
 
-      expect(post).toHaveBeenCalledExactlyOnceWith('/api/tickets/42/replies', { body: reply.body })
+      expect(post).toHaveBeenCalledExactlyOnceWith('/api/tickets/42/replies', expect.any(FormData))
+      expect((post.mock.lastCall![1] as FormData).get('body')).toBe(reply.body)
       const items = await within(thread).findAllByRole('listitem')
       expect(items).toHaveLength(1)
       expect(within(items[0]).getByText(reply.body)).toBeInTheDocument()

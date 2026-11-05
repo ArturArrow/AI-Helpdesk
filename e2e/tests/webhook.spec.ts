@@ -764,6 +764,79 @@ test.describe('POST /api/webhooks/inbound-email: cleaning attachment fields', ()
   }
 })
 
+// Puts a NUL inside the text, where neither trim nor a prefix check could remove it.
+const withNul = (text: string) => `${text.slice(0, 2)}\u0000${text.slice(2)}`
+
+test.describe('POST /api/webhooks/inbound-email: NUL in text fields', () => {
+  for (const field of ['senderName', 'subject', 'body', 'bodyHTML'] as const) {
+    test(`${field} with a NUL gets 201 and is stored without it`, async ({ request }) => {
+      const email = { ...validEmail(), bodyHTML: '<p>It is still burning.</p>' }
+      const id = await expectCreated(await postInbound(request, { ...email, [field]: withNul(email[field]) }))
+
+      await signInViaApi(request, ADMIN)
+      expect(await getTicket(request, id)).toMatchObject(email)
+    })
+  }
+
+  // No response exposes messageId, so matching the id without the NUL shows how it was stored.
+  test('a messageId with a NUL gets 201, is stored without it, and dedupes on redelivery', async ({ request }) => {
+    const messageId = uniqueMessageId('nul')
+    const data = { ...validEmail(), messageId: withNul(messageId) }
+    const id = await expectCreated(await postInbound(request, data))
+
+    for (const redelivery of [{ ...data, messageId }, data]) {
+      const again = await postInbound(request, redelivery)
+      expect(again.status()).toBe(200)
+      expect(await again.json()).toEqual({ ticket: { id } })
+    }
+  })
+
+  test('an unknown inReplyTo with a NUL gets 201 and a new ticket', async ({ request }) => {
+    await expectCreated(await postInbound(request, { ...validEmail(), inReplyTo: withNul(uniqueMessageId('nul')) }))
+  })
+
+  test('an unknown references entry with a NUL gets 201 and a new ticket', async ({ request }) => {
+    const references = [uniqueMessageId('short'), withNul(uniqueMessageId('nul'))]
+    await expectCreated(await postInbound(request, { ...validEmail(), references }))
+  })
+
+  test('an inReplyTo with a NUL still finds the ticket', async ({ request }) => {
+    const ticket = await createThreadTicket(request, 'nul-thread')
+    const { token, data } = replyEmail({ inReplyTo: withNul(ticket.messageId) })
+
+    const replyId = await expectReplyCreated(await postInbound(request, data), ticket.id)
+
+    await expectNoTicketMatching(request, token)
+    const replies = await listReplies(request, ticket.id)
+    expect(replies.map((r: { id: number }) => r.id)).toEqual([replyId])
+  })
+
+  const onlyNul: [string, string][] = [
+    ['body', 'body is required'],
+    ['senderName', 'senderName is required'],
+  ]
+
+  for (const [field, error] of onlyNul) {
+    test(`400 for a ${field} of nothing but NUL, and no ticket is stored`, async ({ request }) => {
+      const subject = `Only NUL ${uniqueSuffix()}`
+      const res = await postInbound(request, { ...validEmail(), subject, [field]: '\u0000\u0000' })
+      expect(res.status()).toBe(400)
+      expect(await res.json()).toEqual({ error })
+      await expectNoTicketMatching(request, subject)
+    })
+  }
+
+  test('201 for a 998-character subject plus a NUL: length is checked after stripping', async ({ request }) => {
+    const subject = 's'.repeat(998)
+    const sent = withNul(subject)
+    expect(sent).toHaveLength(999)
+    const id = await expectCreated(await postInbound(request, { ...validEmail(), subject: sent }))
+
+    await signInViaApi(request, ADMIN)
+    expect((await getTicket(request, id)).subject).toBe(subject)
+  })
+})
+
 test.describe('POST /api/webhooks/inbound-email: attachment limits', () => {
   test('400 for 21 stored files, and no ticket is stored', async ({ request }) => {
     await expectRejected(request, Array.from({ length: 21 }, () => textFile()), 'attachments has too many files')

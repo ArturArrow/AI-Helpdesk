@@ -171,12 +171,12 @@ model Reply {
   @@map("reply")
 }
 
-// A file that came with a customer's email.
+// A file from a customer's email, or one an agent sent with a reply.
 model Attachment {
   id          Int      @id @default(autoincrement())
   ticketId    Int
   ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  // The customer reply it came with; null when it came with the ticket's own email.
+  // The reply it came with; null when it came with the ticket's own email.
   replyId     Int?
   reply       Reply?   @relation(fields: [replyId], references: [id], onDelete: Cascade)
   filename    String
@@ -187,7 +187,8 @@ model Attachment {
   // Over the size limits: listed by name, but only the original email in the mailbox has the file.
   // Its own column because Prisma can't test data for null without reading the bytes.
   tooLarge    Boolean  @default(false)
-  // Null when tooLarge. Only the download route reads it: select attachmentSelect everywhere else.
+  // Null when tooLarge. Only the download route and sendReplyEmail read it: select
+  // attachmentSelect everywhere else.
   data        Bytes?
   createdAt   DateTime @default(now())
 

@@ -4,6 +4,7 @@ import { EmailStatus } from "../../generated/prisma/enums";
 // The database and the mailer's address are replaced before sendReplyEmail.ts loads, so no test
 // needs Postgres or reaches a mailer.
 type StoredReply = {
+  attachments: { filename: string; contentType: string; data: Uint8Array | null }[];
   body: string;
   emailStatus: EmailStatus | null;
   createdAt: Date;
@@ -70,6 +71,7 @@ describe("sendReplyEmail", () => {
       body: "Your refund is on its way.",
       emailStatus: EmailStatus.pending,
       createdAt: new Date("2026-11-01T10:00:00Z"),
+      attachments: [],
       ticket: { id: 7, subject: "Refund", senderEmail: "anna@example.com", messageId: "<t@x>" },
     };
     earlier = [{ messageId: "<c1@x>" }];
@@ -101,6 +103,17 @@ describe("sendReplyEmail", () => {
       where: { id: 3 },
       data: { emailStatus: EmailStatus.sent, messageId: "<sent@x>" },
     });
+  });
+
+  it("sends the reply's files as base64", async () => {
+    stored!.attachments = [
+      { filename: "faktura-ż.pdf", contentType: "application/pdf", data: new Uint8Array(Buffer.from("%PDF")) },
+    ];
+    mailerAnswers(200, { messageId: "<sent@x>" });
+    await sendReplyEmail({ replyId: 3 }, false);
+    expect(JSON.parse(fetchSpy.mock.calls[0]![1]!.body as string).attachments).toEqual([
+      { filename: "faktura-ż.pdf", contentType: "application/pdf", content: Buffer.from("%PDF").toString("base64") },
+    ]);
   });
 
   it.each([EmailStatus.sent, EmailStatus.failed, null])("skips a reply whose status is %s", async (status) => {

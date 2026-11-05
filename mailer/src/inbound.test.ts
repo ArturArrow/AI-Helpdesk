@@ -175,6 +175,42 @@ describe("toInboundEmail attachments", () => {
   });
 });
 
+describe("inboundEmailSchema", () => {
+  const email = { senderEmail: "a@example.com", senderName: "A", body: "Hi" };
+
+  it("strips NUL from every text field, which Postgres would answer with a 500", () => {
+    const parsed = inboundEmailSchema.parse({
+      ...email,
+      senderName: "A\0nna",
+      subject: "Re\0fund",
+      body: "H\0i",
+      bodyHTML: "<p>\0</p>",
+      messageId: "<m\0@x>",
+      inReplyTo: "<r\0@x>",
+      references: ["<f\0@x>"],
+    });
+    expect(parsed).toEqual({
+      ...email,
+      senderName: "Anna",
+      subject: "Refund",
+      body: "Hi",
+      bodyHTML: "<p></p>",
+      messageId: "<m@x>",
+      inReplyTo: "<r@x>",
+      references: ["<f@x>"],
+    });
+  });
+
+  it("treats a body of nothing but NUL as blank", () => {
+    const result = inboundEmailSchema.safeParse({ ...email, body: "\0\0" });
+    expect(result.error?.issues[0]?.message).toBe("body is required");
+  });
+
+  it("checks the length after stripping", () => {
+    expect(inboundEmailSchema.safeParse({ ...email, subject: `${"s".repeat(998)}\0` }).success).toBe(true);
+  });
+});
+
 describe("forward", () => {
   const email = { senderEmail: "a@example.com", senderName: "A", body: "Hi", messageId: "<m@example.com>" };
   afterEach(() => mock.restore());

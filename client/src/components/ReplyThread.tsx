@@ -24,7 +24,7 @@ export interface Reply {
   createdAt: string
   // Null for ReplySender.customer.
   author: { id: string; name: string } | null
-  // The files of a customer's email.
+  // The files of a customer's email, or the ones an agent sent with the reply.
   attachments: Attachment[]
 }
 

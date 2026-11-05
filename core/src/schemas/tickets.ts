@@ -10,26 +10,38 @@ import { VISIBLE_TICKET_STATUSES } from "../constants/ticketStatus";
 // What a stored email says in place of a body when it had only attachments or HTML.
 const NO_TEXT = "(no text)";
 
+// Postgres text can't hold NUL, in a stored value or a lookup, and that 500 would have the mailer
+// retry the email forever. It goes before trim and the length checks, so a value of nothing but
+// NUL counts as empty.
+function stripNul(text: string) {
+  return text.replaceAll("\0", "");
+}
+
 // The size of base64 content once decoded, without decoding it.
 function decodedBytes(base64: string) {
   return (base64.length / 4) * 3 - (base64.match(/=+$/)?.[0].length ?? 0);
 }
 
+// A file's name and type, whoever sent it, are cleaned rather than rejected, so an odd value can't
+// lose the whole email. Control characters go because Postgres text can't hold NUL, and that 500
+// would have the mailer retry the email forever.
+export const attachmentFilenameSchema = z
+  .string({ error: "attachment filename is required" })
+  .transform((filename) => filename.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 255) || "attachment");
+
+export const attachmentContentTypeSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/)
+  .max(255)
+  .catch("application/octet-stream");
+
 // A file from the email. Without content it's one the sender left out for being over the limits:
-// it's listed by name, and only the original email has it. Sender-controlled text is cleaned rather
-// than rejected, so an odd header can't lose the whole email. Control characters go because
-// Postgres text can't hold NUL, and that 500 would have the mailer retry the email forever.
+// it's listed by name, and only the original email has it.
 const inboundAttachmentSchema = z.object({
-  filename: z
-    .string({ error: "attachment filename is required" })
-    .transform((filename) => filename.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 255) || "attachment"),
-  contentType: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .regex(/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/)
-    .max(255)
-    .catch("application/octet-stream"),
+  filename: attachmentFilenameSchema,
+  contentType: attachmentContentTypeSchema,
   size: z.int("attachment size must be an integer").min(0).max(2_147_483_647),
   // Printable ASCII, as in the header it comes from; a bad one only leaves an inline image broken.
   contentId: z.string().trim().regex(/^[\x21-\x7e]+$/).max(998).optional().catch(undefined),
@@ -50,24 +62,26 @@ export const inboundEmailSchema = z
       .pipe(z.email("senderEmail must be a valid email address")),
     senderName: z
       .string({ error: "senderName is required" })
+      .overwrite(stripNul)
       .trim()
       .min(1, "senderName is required")
       .max(998, "senderName is too long"),
     subject: z
       .string()
+      .overwrite(stripNul)
       .trim()
       .max(998, "subject is too long")
       .optional()
       .transform((subject) => subject || "(no subject)"),
     // May be blank when the email has attachments or HTML, which the checks below decide.
-    body: z.string({ error: "body is required" }).trim().max(50_000, "body is too long"),
-    bodyHTML: z.string().max(100_000, "bodyHTML is too long").optional(),
-    messageId: z.string().trim().min(1).max(998, "messageId is too long").optional(),
+    body: z.string({ error: "body is required" }).overwrite(stripNul).trim().max(50_000, "body is too long"),
+    bodyHTML: z.string().overwrite(stripNul).max(100_000, "bodyHTML is too long").optional(),
+    messageId: z.string().overwrite(stripNul).trim().min(1).max(998, "messageId is too long").optional(),
     // Threading headers: In-Reply-To and the Message-IDs listed in References. An email that
     // points at a known ticket or customer reply is stored as a reply on that ticket.
-    inReplyTo: z.string().trim().min(1).max(998, "inReplyTo is too long").optional(),
+    inReplyTo: z.string().overwrite(stripNul).trim().min(1).max(998, "inReplyTo is too long").optional(),
     references: z
-      .array(z.string().trim().min(1).max(998, "references entry is too long"), {
+      .array(z.string().overwrite(stripNul).trim().min(1).max(998, "references entry is too long"), {
         error: "references must be an array of Message-IDs",
       })
       .max(100, "references has too many entries")

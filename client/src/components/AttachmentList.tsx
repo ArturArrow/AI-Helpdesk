@@ -1,12 +1,7 @@
 import type { Attachment } from 'core/constants/attachment'
 import { CardContent } from '@/components/ui/card.tsx'
 import { attachmentUrl } from '@/lib/emailHtml.ts'
-
-function formatSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
+import { formatSize } from '@/lib/formatSize.ts'
 
 type AttachmentListProps = {
   ticketId: number
