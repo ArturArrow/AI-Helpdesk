@@ -67,3 +67,17 @@ class Store:
             self._vectors.delete(filter={"document_id": document_id})
             raise
         return document
+
+    def list(self) -> list[dict]:
+        with self._connect() as connection:
+            return connection.execute(f"SELECT {DOCUMENT_COLUMNS} FROM documents ORDER BY created_at DESC, id").fetchall()
+
+    # False when there's no such document. The row goes only once its vectors are gone, so a
+    # failure leaves a document that can be deleted again.
+    def delete(self, document_id: str) -> bool:
+        with self._connect() as connection:
+            deleted = connection.execute("DELETE FROM documents WHERE id = %s RETURNING id", (document_id,)).fetchone()
+            if deleted is None:
+                return False
+            self._vectors.delete(filter={"document_id": document_id})
+        return True
