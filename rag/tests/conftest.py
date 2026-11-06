@@ -27,3 +27,14 @@ def empty_store(store):
     with psycopg.connect(TEST_DATABASE_URL) as connection:
         connection.execute("TRUNCATE documents, chunks")
     return store
+
+
+# Without `with`, so the app's lifespan (the real store and OpenAI) doesn't run.
+@pytest.fixture
+def client(empty_store):
+    from app.main import app
+    from app.routes import get_store
+
+    app.dependency_overrides[get_store] = lambda: empty_store
+    yield TestClient(app, headers={"X-Rag-Secret": "test-secret"})
+    app.dependency_overrides.clear()

@@ -1,4 +1,7 @@
+from uuid import uuid4
+
 import psycopg
+from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_postgres import Column, PGEngine, PGVectorStore
 from psycopg.rows import dict_row
@@ -6,6 +9,13 @@ from psycopg.rows import dict_row
 # The size of text-embedding-3-small's vectors. Changing the model means re-embedding every document.
 EMBEDDING_SIZE = 1536
 CHUNKS_TABLE = "chunks"
+
+# Named as the API returns them, so a row is the response.
+DOCUMENT_COLUMNS = 'id, filename, size, chunk_count AS "chunkCount", created_at AS "createdAt"'
+
+
+class DuplicateDocument(Exception):
+    pass
 
 
 # The documents and their chunks. Filenames are unique, so the row doubles as the check for a
@@ -37,3 +47,23 @@ class Store:
 
     def _connect(self) -> psycopg.Connection:
         return psycopg.connect(self._database_url, row_factory=dict_row)
+
+    # The row commits only once the vectors are in, so a failure leaves neither behind.
+    def add(self, filename: str, size: int, chunks: list[Document]) -> dict:
+        document_id = str(uuid4())
+        for chunk in chunks:
+            chunk.metadata |= {"document_id": document_id, "filename": filename}
+        try:
+            with self._connect() as connection:
+                document = connection.execute(
+                    f"""INSERT INTO documents (id, filename, size, chunk_count) VALUES (%s, %s, %s, %s)
+                        RETURNING {DOCUMENT_COLUMNS}""",
+                    (document_id, filename, size, len(chunks)),
+                ).fetchone()
+                self._vectors.add_documents(chunks)
+        except psycopg.errors.UniqueViolation as error:
+            raise DuplicateDocument from error
+        except Exception:
+            self._vectors.delete(filter={"document_id": document_id})
+            raise
+        return document
