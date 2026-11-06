@@ -10,5 +10,9 @@ def required(name: str) -> str:
     return value
 
 
+# A database of its own: Prisma would read these tables in `helpdesk` as drift.
+DATABASE_URL = required("DATABASE_URL")
+OPENAI_API_KEY = required("OPENAI_API_KEY")
+
 # Callers (the server) send it in X-Rag-Secret.
 RAG_SECRET = required("RAG_SECRET")
