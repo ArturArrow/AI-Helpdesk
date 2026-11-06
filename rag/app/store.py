@@ -68,7 +68,7 @@ class Store:
             raise
         return document
 
-    def list(self) -> list[dict]:
+    def list_documents(self) -> list[dict]:
         with self._connect() as connection:
             return connection.execute(f"SELECT {DOCUMENT_COLUMNS} FROM documents ORDER BY created_at DESC, id").fetchall()
 
@@ -81,3 +81,16 @@ class Store:
                 return False
             self._vectors.delete(filter={"document_id": document_id})
         return True
+
+    # The closest chunks, best first. The score is cosine similarity: LangChain returns the distance.
+    def search(self, query: str, k: int) -> list[dict]:
+        results = self._vectors.similarity_search_with_score(query, k=k)
+        return [
+            {
+                "text": chunk.page_content,
+                "filename": chunk.metadata["filename"],
+                "page": chunk.metadata["page"],
+                "score": 1 - distance,
+            }
+            for chunk, distance in results
+        ]
