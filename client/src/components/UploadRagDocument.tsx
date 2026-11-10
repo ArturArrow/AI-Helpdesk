@@ -42,13 +42,13 @@ function UploadRagDocument() {
 
   function choose(file: File | undefined) {
     if (!file) return
-    upload.reset()
     const error = fileError(file)
     setChosenError(error)
     if (!error) upload.mutate(file)
   }
 
   // The server's message says what to fix (a name in use, a scanned PDF), so it's shown as is.
+  // A rejected choice's own message goes first, and mutate clears the last upload's error.
   const uploadError = upload.error
     ? ((axios.isAxiosError(upload.error) ? upload.error.response?.data?.error : undefined) ??
       "Couldn't add the document.")
