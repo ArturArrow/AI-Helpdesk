@@ -10,8 +10,11 @@ from psycopg.rows import dict_row
 EMBEDDING_SIZE = 1536
 CHUNKS_TABLE = "chunks"
 
-# Named as the API returns them, so a row is the response.
-DOCUMENT_COLUMNS = 'id, filename, size, chunk_count AS "chunkCount", created_at AS "createdAt"'
+# Named as the API returns them, so a row is the response. Never the original's bytes: hasFile reads
+# only whether there are any, which Postgres answers without loading them.
+DOCUMENT_COLUMNS = (
+    'id, filename, size, chunk_count AS "chunkCount", created_at AS "createdAt", data IS NOT NULL AS "hasFile"'
+)
 
 
 class DuplicateDocument(Exception):
@@ -34,6 +37,8 @@ class Store:
                     created_at timestamptz NOT NULL DEFAULT now()
                 )
             """)
+            # The original file, for downloading it. Null for documents added before it was kept.
+            connection.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS data bytea")
             exists = connection.execute("SELECT to_regclass(%s) AS name", (CHUNKS_TABLE,)).fetchone()["name"]
         # init_vectorstore_table has no IF NOT EXISTS: it fails on an existing table.
         if exists is None:
@@ -49,16 +54,16 @@ class Store:
         return psycopg.connect(self._database_url, row_factory=dict_row)
 
     # The row commits only once the vectors are in, so a failure leaves neither behind.
-    def add(self, filename: str, size: int, chunks: list[Document]) -> dict:
+    def add(self, filename: str, data: bytes, chunks: list[Document]) -> dict:
         document_id = str(uuid4())
         for chunk in chunks:
             chunk.metadata |= {"document_id": document_id, "filename": filename}
         try:
             with self._connect() as connection:
                 document = connection.execute(
-                    f"""INSERT INTO documents (id, filename, size, chunk_count) VALUES (%s, %s, %s, %s)
+                    f"""INSERT INTO documents (id, filename, size, chunk_count, data) VALUES (%s, %s, %s, %s, %s)
                         RETURNING {DOCUMENT_COLUMNS}""",
-                    (document_id, filename, size, len(chunks)),
+                    (document_id, filename, len(data), len(chunks), data),
                 ).fetchone()
                 self._vectors.add_documents(chunks)
         except psycopg.errors.UniqueViolation as error:
@@ -71,6 +76,14 @@ class Store:
     def list_documents(self) -> list[dict]:
         with self._connect() as connection:
             return connection.execute(f"SELECT {DOCUMENT_COLUMNS} FROM documents ORDER BY created_at DESC, id").fetchall()
+
+    # The original file's name and bytes, or None when there's no such document or it has no original.
+    def file(self, document_id: str) -> tuple[str, bytes] | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT filename, data FROM documents WHERE id = %s", (document_id,)).fetchone()
+        if row is None or row["data"] is None:
+            return None
+        return row["filename"], bytes(row["data"])
 
     # False when there's no such document. The row goes only once its vectors are gone, so a
     # failure leaves a document that can be deleted again.

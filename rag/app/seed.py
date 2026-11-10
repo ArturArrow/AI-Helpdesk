@@ -16,7 +16,7 @@ def seed(store: Store, directory: Path = SEED_DIRECTORY) -> list[str]:
             continue
         data = path.read_bytes()
         try:
-            store.add(path.name, len(data), to_chunks(path.name, data))
+            store.add(path.name, data, to_chunks(path.name, data))
         except DuplicateDocument:
             continue
         added.append(path.name)

@@ -15,7 +15,7 @@ def columns(table: str) -> set[str]:
 
 
 def test_creates_both_tables(store):
-    assert columns("documents") == {"id", "filename", "size", "chunk_count", "created_at"}
+    assert columns("documents") == {"id", "filename", "size", "chunk_count", "created_at", "data"}
     assert {"content", "embedding", "document_id"} <= columns("chunks")
 
 

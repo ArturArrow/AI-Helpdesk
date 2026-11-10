@@ -1,7 +1,8 @@
 from typing import Annotated
+from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, UploadFile
 from openai import OpenAIError
 from pydantic import BaseModel, Field
 
@@ -47,13 +48,24 @@ def add_document(file: UploadFile, store: StoreDependency) -> dict:
     if len(data) > MAX_DOCUMENT_BYTES:
         raise HTTPException(status_code=413, detail="The file is larger than 20 MB.")
     try:
-        return store.add(filename, len(data), to_chunks(filename, data))
+        return store.add(filename, data, to_chunks(filename, data))
     except UnreadableDocument as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except DuplicateDocument as error:
         raise HTTPException(status_code=409, detail="A document with this name already exists.") from error
     except OpenAIError as error:
         raise HTTPException(status_code=502, detail="The embeddings couldn't be created.") from error
+
+
+# The original file. The server sets the download headers; the name goes in X-Filename,
+# percent-encoded, since a header can't carry a Polish one as is.
+@router.get("/documents/{document_id}/file")
+def download_document(document_id: UUID, store: StoreDependency) -> Response:
+    found = store.file(str(document_id))
+    if found is None:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    filename, data = found
+    return Response(data, media_type="application/octet-stream", headers={"X-Filename": quote(filename)})
 
 
 @router.delete("/documents/{document_id}", status_code=204)
