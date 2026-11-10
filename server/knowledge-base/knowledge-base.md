@@ -138,13 +138,4 @@ Proof of purchase (if requested)
 
 ------------------------------------------------------------------------
 
-## 10. Escalation Rules (Internal Policy)
-
-The system must escalate to a human agent if: - The user threatens legal
-action. - The user requests a refund outside the 30-day window. - The
-user disputes a charge or mentions a chargeback. - The issue involves
-account security concerns. - The system confidence score is low.
-
-------------------------------------------------------------------------
-
 End of Knowledge Base

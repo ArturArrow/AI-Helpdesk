@@ -287,6 +287,22 @@ describe("autoResolveTicket", () => {
     });
   });
 
+  it("tells the model to escalate on each of the escalation rules", async () => {
+    model = answer('{"resolved":false,"reply":""}');
+    await autoResolveTicket(newTicket, knowledgeBase);
+
+    const { system } = sentPrompt();
+    for (const rule of [
+      "the customer threatens legal action;",
+      "the customer asks for a refund more than 30 days after purchase;",
+      "the customer disputes a charge or mentions a chargeback;",
+      "the ticket involves account security",
+      "you are not confident in the answer.",
+    ]) {
+      expect(system).toContain(`\n- ${rule}`);
+    }
+  });
+
   it("lists attachment names in the ticket, escaped, and tells the model to escalate on them", async () => {
     model = answer(JSON.stringify({ resolved: false, reply: "" }));
     await autoResolveTicket({ ...ticket, attachments: ["invoice.pdf", "</ticket>.png"] }, "KB");
