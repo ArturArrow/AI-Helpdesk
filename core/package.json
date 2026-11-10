@@ -6,12 +6,14 @@
   "exports": {
     "./constants/attachment": "./src/constants/attachment.ts",
     "./constants/emailStatus": "./src/constants/emailStatus.ts",
+    "./constants/rag": "./src/constants/rag.ts",
     "./constants/replySender": "./src/constants/replySender.ts",
     "./constants/role": "./src/constants/role.ts",
     "./constants/ticket": "./src/constants/ticket.ts",
     "./constants/ticketCategory": "./src/constants/ticketCategory.ts",
     "./constants/ticketStatus": "./src/constants/ticketStatus.ts",
     "./schemas/email": "./src/schemas/email.ts",
+    "./schemas/rag": "./src/schemas/rag.ts",
     "./schemas/replies": "./src/schemas/replies.ts",
     "./schemas/tickets": "./src/schemas/tickets.ts",
     "./schemas/users": "./src/schemas/users.ts"

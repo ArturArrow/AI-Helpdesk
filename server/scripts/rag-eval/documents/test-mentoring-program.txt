@@ -1,0 +1,21 @@
+Przyszly Programista -- Mentoring Program
+
+What it is
+
+Mentoring is a 1:1 video call with one of our mentors (senior developers who work with the course authors). You can use it for code review, career advice or help with a project.
+
+Who can book
+
+Mentoring is available only to people who bought the Pro plan or a course bundle. Buyers of a single course can't book sessions; they can upgrade to Pro in the dashboard and pay only the difference.
+
+Price and limits
+
+A 60-minute session costs 249 zł. Pro plan members get 2 sessions per month included and can buy more at 199 zł each. You can book at most 4 sessions per calendar month in total.
+
+Booking and cancelling
+
+Book sessions from the calendar in Dashboard > Mentoring. A session can be cancelled or moved free of charge up to 24 hours before it starts. A session cancelled later, or missed, is charged in full and doesn't come back to the monthly allowance.
+
+Before the session
+
+Send the code you want reviewed (a GitHub link is best) at least 48 hours before the session, so the mentor can prepare. Sessions are held on Google Meet; the link is in the booking confirmation email. Sessions are in Polish or English.

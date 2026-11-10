@@ -2,11 +2,18 @@ node_modules
 dist
 .env
 *.log
+# AI prompt logs and evaluation results (server/scripts/evalRag.ts)
+/server/logs/
 /e2e/test-results/
 playwright-report/
 blob-report/
 playwright/.cache/
 playwright/.auth/
+
+# Python (rag/)
+.venv/
+__pycache__/
+.pytest_cache/
 
 # macOS
 .DS_Store

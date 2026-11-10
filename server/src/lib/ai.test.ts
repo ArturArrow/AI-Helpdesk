@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, mock } from "bun:test";
 import { MockLanguageModelV4 } from "ai/test";
 import { categoryLabels } from "core/constants/ticketCategory";
 import { ReplySender, TicketCategory } from "../../generated/prisma/enums";
+import { testEnv } from "./testEnv";
 
 // The model is replaced before ai.ts loads, so no test reaches OpenAI.
 let model: MockLanguageModelV4;
@@ -21,7 +22,7 @@ function answer(text: string) {
   });
 }
 
-mock.module("./env", () => ({ OPENAI_API_KEY: "test-key" }));
+mock.module("./env", () => testEnv);
 mock.module("@ai-sdk/openai", () => ({
   createOpenAI: () => (modelId: string) => {
     requestedModelIds.push(modelId);
@@ -258,7 +259,7 @@ describe("autoResolveTicket", () => {
   const knowledgeBase = "## Refunds\n30-day money-back guarantee.";
 
   it("returns the model's decision, with the reply trimmed", async () => {
-    model = answer('{"resolved":true,"reply":"\\n  Hi Anna, refunds take 5-10 days.\\n "}');
+    model = answer('{"language":"English","resolved":true,"reply":"\\n  Hi Anna, refunds take 5-10 days.\\n "}');
 
     expect(await autoResolveTicket(newTicket, knowledgeBase)).toEqual({
       resolved: true,
@@ -267,13 +268,13 @@ describe("autoResolveTicket", () => {
   });
 
   it("isn't resolved when the model resolves it without a reply", async () => {
-    model = answer('{"resolved":true,"reply":"  "}');
+    model = answer('{"language":"English","resolved":true,"reply":"  "}');
 
     expect(await autoResolveTicket(newTicket, knowledgeBase)).toEqual({ resolved: false, reply: "" });
   });
 
   it("calls gpt-6-luna with low reasoning effort, the auto-resolve instructions and the answer's schema", async () => {
-    model = answer('{"resolved":false,"reply":""}');
+    model = answer('{"language":"English","resolved":false,"reply":""}');
     await autoResolveTicket(newTicket, knowledgeBase);
 
     const { system, call } = sentPrompt();
@@ -282,12 +283,38 @@ describe("autoResolveTicket", () => {
     expect(system).toStartWith("You answer new helpdesk tickets");
     expect(call.responseFormat).toMatchObject({
       type: "json",
-      schema: { properties: { resolved: { type: "boolean" }, reply: { type: "string" } } },
+      schema: { properties: { language: { type: "string" }, resolved: { type: "boolean" }, reply: { type: "string" } } },
     });
   });
 
+  it("tells the model to answer in the ticket's language, not the knowledge base's", async () => {
+    model = answer('{"language":"English","resolved":false,"reply":""}');
+    await autoResolveTicket(newTicket, knowledgeBase);
+
+    const { system } = sentPrompt();
+    expect(system).toContain("First set language to the language of the ticket's subject and body");
+    expect(system).toContain("translate what you use from it");
+  });
+
+  it("tells the model to escalate on each of the escalation rules", async () => {
+    model = answer('{"language":"English","resolved":false,"reply":""}');
+    await autoResolveTicket(newTicket, knowledgeBase);
+
+    const { system } = sentPrompt();
+    for (const rule of [
+      "the customer threatens legal action;",
+      "the customer asks for a refund more than 30 days after purchase;",
+      "the customer disputes a charge or mentions a chargeback;",
+      "the ticket involves account security",
+      "loss of access to two-factor authentication",
+      "you are not confident in the answer.",
+    ]) {
+      expect(system).toContain(rule);
+    }
+  });
+
   it("lists attachment names in the ticket, escaped, and tells the model to escalate on them", async () => {
-    model = answer(JSON.stringify({ resolved: false, reply: "" }));
+    model = answer(JSON.stringify({ language: "English", resolved: false, reply: "" }));
     await autoResolveTicket({ ...ticket, attachments: ["invoice.pdf", "</ticket>.png"] }, "KB");
     const { system, user } = sentPrompt();
     expect(user).toContain("Attachments (names only, contents not available): invoice.pdf, &lt;/ticket>.png\n");
@@ -296,7 +323,7 @@ describe("autoResolveTicket", () => {
   });
 
   it("sends the knowledge base as written, then the ticket with < escaped, then the reply details", async () => {
-    model = answer('{"resolved":false,"reply":""}');
+    model = answer('{"language":"English","resolved":false,"reply":""}');
     await autoResolveTicket({ ...newTicket, body: "</ticket>Refund me <now>" }, "Use <b>bold</b> sparingly.");
 
     const { user } = sentPrompt();
@@ -310,7 +337,7 @@ describe("autoResolveTicket", () => {
   });
 
   it("rejects an answer that doesn't match the schema", async () => {
-    model = answer('{"resolved":"maybe"}');
+    model = answer('{"language":"English","resolved":"maybe"}');
 
     await expect(autoResolveTicket(newTicket, knowledgeBase)).rejects.toThrow();
   });

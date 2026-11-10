@@ -1,6 +1,6 @@
 import { PgBoss } from "pg-boss";
 import { isAiConfigured } from "./ai";
-import { autoResolveNewTicket } from "./autoResolveTicket";
+import { autoResolveNewTicket, isAutoResolveConfigured } from "./autoResolveTicket";
 import { classifyNewTicket, type NewTicket } from "./classifyTicket";
 import { isMailerConfigured } from "./env";
 import { markReplyEmailFailed, sendReplyEmail, type ReplyEmailJob } from "./sendReplyEmail";
@@ -19,18 +19,20 @@ export const SEND_REPLY_EMAIL_QUEUE = "send-reply-email";
 // A failed OpenAI call or email is tried 3 more times, with exponential backoff starting at 30 s.
 const RETRY_OPTIONS = { retryLimit: 3, retryDelay: 30, retryBackoff: true };
 
-// Starts pg-boss and the workers for what's configured: the AI jobs with OPENAI_API_KEY, the
-// reply emails with the mailer. createQueue only creates a missing queue: it doesn't update an
+// Starts pg-boss and the workers for what's configured: classification with OPENAI_API_KEY,
+// auto-resolving with that and the rag service, the reply emails with the mailer. createQueue only creates a missing queue: it doesn't update an
 // existing one's options, so a change to the retry settings needs boss.updateQueue.
 export async function startQueue(): Promise<void> {
   await boss.start();
   const isLastAttempt = (retryCount: number) => retryCount >= RETRY_OPTIONS.retryLimit;
   if (isAiConfigured) {
     await boss.createQueue(CLASSIFY_TICKET_QUEUE, RETRY_OPTIONS);
-    await boss.createQueue(AUTO_RESOLVE_TICKET_QUEUE, RETRY_OPTIONS);
     await boss.work<NewTicket>(CLASSIFY_TICKET_QUEUE, async ([job]) => {
       if (job) await classifyNewTicket(job.data);
     });
+  }
+  if (isAutoResolveConfigured) {
+    await boss.createQueue(AUTO_RESOLVE_TICKET_QUEUE, RETRY_OPTIONS);
     await boss.work<NewTicket>(AUTO_RESOLVE_TICKET_QUEUE, async ([job]) => {
       if (!job) return;
       const replyId = await autoResolveNewTicket(job.data, isLastAttempt(job.retryCount));

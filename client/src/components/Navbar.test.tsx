@@ -37,6 +37,18 @@ describe('Navbar', () => {
     expect(screen.queryByRole('link', { name: 'Users' })).not.toBeInTheDocument()
   })
 
+  it('shows the Knowledge base link to admins', () => {
+    renderNavbar(true)
+
+    expect(screen.getByRole('link', { name: 'Knowledge base' })).toHaveAttribute('href', '/rag')
+  })
+
+  it('hides the Knowledge base link from agents', () => {
+    renderNavbar(false)
+
+    expect(screen.queryByRole('link', { name: 'Knowledge base' })).not.toBeInTheDocument()
+  })
+
   it.each([true, false])('shows the Tickets link (isAdmin: %s)', (isAdmin) => {
     renderNavbar(isAdmin)
 

@@ -2,9 +2,9 @@
 
 ## Last run
 
-- **Date:** 2026-11-05
-- **Discovered (`--list`):** 462 tests in 9 files.
-- **Result:** 462 passed, 0 failed (1.2m), after stripping NUL from the webhook's text fields.
+- **Date:** 2026-11-10
+- **Discovered (`--list`):** 474 tests in 10 files.
+- **Result:** 474 passed, 0 failed (1.9m), after adding the `GET /api/rag/documents/:id/file` guard tests.
 
 ## tests/login.spec.ts
 
@@ -402,6 +402,14 @@ GET `/api/tickets/stats` (`{ total, open, resolvedByAi, averageResolutionMs, tic
 - PATCH closed → open clears it.
 - A webhook customer reply (`inReplyTo` the ticket's `messageId`) to an AI-resolved ticket gets 201 and leaves `{ total: 1, open: 1, resolvedByAi: 0, averageResolutionMs: null }`.
 
+## tests/rag.spec.ts
+
+The `/api/rag` guards at the API level. `server/.env.test` sets neither `RAG_URL` nor `RAG_SECRET`, so a request past `requireAuth` and `requireAdmin` gets the router's 503, which shows it got through both guards. For each of GET `/api/rag/documents`, POST `/api/rag/documents` (multipart, a small `.txt` as `file`), GET `/api/rag/documents/:id/file` and DELETE `/api/rag/documents/:id` (both with a well-formed UUID):
+
+- 401 `{"error":"Unauthorized"}` without a session.
+- 403 `{"error":"Forbidden"}` for the agent.
+- 503 `{"error":"The document service isn't configured"}` for the admin.
+
 ## Harness helpers
 
 - **`fixtures/auth.ts`:**
@@ -477,6 +485,7 @@ GET `/api/tickets/stats` (`{ total, open, resolvedByAi, averageResolutionMs, tic
 - **Filenames passed to the AI jobs:** the webhook adds them to the queued job only with `OPENAI_API_KEY`, so that needs server unit tests.
 - **Concurrent redelivery with attachments:** only sequential redelivery is tested; the P2002 path can't be forced from a serial test.
 - **Attachments going with their ticket:** the cascade is only exercised by the stats tests' table wipe, which checks nothing about attachments, and there is no endpoint that deletes tickets.
+- **The rag proxy itself:** listing, uploading, downloading (`GET /api/rag/documents/:id/file`: the file, its `Content-Disposition`/`nosniff`/`CSP: sandbox` headers, a missing document) and deleting documents, upload errors (400/413), and the id validation on DELETE and the file download need a running rag service, or at least `RAG_URL`/`RAG_SECRET` on the test server; E2E runs without them, and the router's 503 answers before any of that. The proxy logic is in `server/src/lib/rag.test.ts`. Testing it end to end would need a stub rag service and a separate `webServer` with those variables.
 - **Not built yet:** an inbound email provider adapter, restoring a deleted user, ticket creation through the API and updates to content (subject, body; PATCH ignores unknown fields), AI features other than reply polishing, ticket summaries, classification and auto-resolving, and email.
 
 ## Open questions
@@ -517,4 +526,6 @@ GET `/api/tickets/stats` (`{ total, open, resolvedByAi, averageResolutionMs, tic
 - **A reply's upload errors are the libraries' English text:** `uploadAttachments` passes on multer's and busboy's messages (`File too large`, `Unexpected file field`, `Unexpected end of form`), so `replies.spec.ts` would fail on a reworded message after a multer upgrade, and an agent could see that text. Mapping them to our own messages would make the tests and the wording stable. The status, JSON shape and messages were checked against multer 2.5.0 under Bun and through a Vite proxy in a throwaway server with no database, not in a suite run.
 - **The 18 MiB total is checked after the upload is in memory:** multer buffers up to 10 files of 10 MiB, so any signed-in user can make one request hold 100 MiB before the 413. Not tested.
 - **`Attachment`'s schema comment still says "customer's email":** agents' files use the same model now. Nothing a test sees.
+- **The rag 503 tests depend on the variables being absent:** like the `OPENAI_API_KEY` caveat, a `RAG_URL` and `RAG_SECRET` exported in the shell `webServer` inherits (or added to `server/.env.test`) would turn the admin tests into calls to the rag service.
+- **The 503 answers before the id is checked:** an admin DELETE with a malformed id gets 503, not 400, while the service is unconfigured. Not tested; the tests use a valid UUID.
 - **App changes needed:** likely one, for the `tz=+09:00` stats test (see the offset-`tz` entry above). Every locator uses an accessible label, role or text.

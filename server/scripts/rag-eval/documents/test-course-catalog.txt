@@ -1,0 +1,28 @@
+Przyszly Programista -- Course Catalog
+
+JavaScript od podstaw
+Level: beginner. Length: 42 hours of video, 120 exercises. Price: 399 zł. Prerequisites: none. Covers the language, the DOM, async code and a final project (a weather app).
+
+React w praktyce
+Level: intermediate. Length: 36 hours of video. Price: 499 zł. Prerequisites: JavaScript basics (the JavaScript od podstaw course is enough). Covers hooks, routing, forms, TanStack Query and testing with React Testing Library. Updated for React 19.
+
+Node.js i Express
+Level: intermediate. Length: 28 hours. Price: 449 zł. Prerequisites: JavaScript basics. Covers REST APIs, PostgreSQL with Prisma, authentication and deployment with Docker.
+
+Python dla początkujących
+Level: beginner. Length: 30 hours. Price: 349 zł. Prerequisites: none. Covers the language, files, APIs and a final automation project.
+
+SQL i bazy danych
+Level: beginner. Length: 18 hours. Price: 299 zł. Prerequisites: none. Uses PostgreSQL.
+
+Bundles
+
+The Full-Stack bundle (JavaScript od podstaw, React w praktyce, Node.js i Express) costs 1099 zł instead of 1347 zł and includes the Pro plan for 12 months.
+
+Coming soon
+
+TypeScript dla zaawansowanych is planned for March 2027. There are no plans for courses on Kotlin, Swift, Java or C#.
+
+Course updates
+
+Courses are updated when the technology changes; updates are free for everyone who bought the course (see Lifetime Access). Each lesson shows the date of its last update.

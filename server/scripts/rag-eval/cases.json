@@ -1,0 +1,517 @@
+[
+ {
+  "id": 1,
+  "subject": "Nie pamiętam hasła",
+  "body": "Nie mogę się zalogować, nie pamiętam hasła. Co zrobić?",
+  "language": "pl",
+  "document": "support-knowledge-base.txt",
+  "marker": "Forgot Password",
+  "expect": "resolve",
+  "facts": [
+   "(?i)forgot password|zapomnia|nie pamięta"
+  ]
+ },
+ {
+  "id": 2,
+  "subject": "Zwrot",
+  "body": "Kupiłam kurs 10 dni temu, obejrzałam dwie lekcje. Czy mogę dostać zwrot i ile to trwa?",
+  "language": "pl",
+  "document": "support-knowledge-base.txt",
+  "marker": "30-day money-back",
+  "expect": "resolve",
+  "facts": [
+   "(?i)30|pełny zwrot|pełnego zwrotu",
+   "5\\s*[-–—]+\\s*10|5 do 10"
+  ]
+ },
+ {
+  "id": 3,
+  "subject": "Refund after finishing most of the course",
+  "body": "I've completed about 90% of the course but I'm not happy with it. Can I still get a refund?",
+  "language": "en",
+  "document": "support-knowledge-base.txt",
+  "marker": "80%",
+  "expect": "either",
+  "facts": [
+   "80"
+  ]
+ },
+ {
+  "id": 4,
+  "subject": "Zwrot po 45 dniach",
+  "body": "Kupiłem kurs 45 dni temu i chcę zwrot pieniędzy.",
+  "language": "pl",
+  "document": "support-knowledge-base.txt",
+  "marker": "30-day money-back",
+  "expect": "escalate",
+  "facts": []
+ },
+ {
+  "id": 5,
+  "subject": "Certificate",
+  "body": "Is the certificate I get after finishing the course an accredited degree?",
+  "language": "en",
+  "document": "support-knowledge-base.txt",
+  "marker": "accredited",
+  "expect": "resolve",
+  "facts": [
+   "(?i)not accredited|isn't an accredited|is not an accredited|not an accredited"
+  ]
+ },
+ {
+  "id": 6,
+  "subject": "Kod rabatowy",
+  "body": "Mój kod rabatowy nie działa przy zakupie kursu React.",
+  "language": "pl",
+  "document": "support-knowledge-base.txt",
+  "marker": "coupon has expired",
+  "expect": "resolve",
+  "facts": [
+   "(?i)wygas|ważn"
+  ]
+ },
+ {
+  "id": 7,
+  "subject": "Transfer",
+  "body": "Can I move my course to my wife's account? She wants to learn too.",
+  "language": "en",
+  "document": "support-knowledge-base.txt",
+  "marker": "non-transferable",
+  "expect": "resolve",
+  "facts": [
+   "(?i)transfer|tied to|cannot be moved|can't be moved|not possible"
+  ]
+ },
+ {
+  "id": 8,
+  "subject": "Zmiana emaila",
+  "body": "Chcę zmienić adres email na koncie z jan@a.pl na jan@b.pl.",
+  "language": "pl",
+  "document": "support-knowledge-base.txt",
+  "marker": "change my email",
+  "expect": "escalate",
+  "facts": []
+ },
+ {
+  "id": 9,
+  "subject": "Słaba jakość wideo",
+  "body": "Filmy mają bardzo słabą jakość, wszystko jest rozmazane.",
+  "language": "pl",
+  "document": "test-technical-requirements.txt",
+  "marker": "5 Mbps",
+  "expect": "resolve",
+  "facts": [
+   "(?i)internet|połącz"
+  ]
+ },
+ {
+  "id": 10,
+  "subject": "Faktura VAT",
+  "body": "Czy wystawiacie faktury VAT na firmę?",
+  "language": "pl",
+  "document": "test-platnosci-i-faktury.txt",
+  "marker": "Faktury VAT",
+  "expect": "resolve",
+  "facts": [
+   "NIP"
+  ]
+ },
+ {
+  "id": 11,
+  "subject": "Zapomniałem zaznaczyć fakturę",
+  "body": "Kupiłem kurs 3 dni temu i zapomniałem zaznaczyć fakturę na firmę. Co mogę zrobić?",
+  "language": "pl",
+  "document": "test-platnosci-i-faktury.txt",
+  "marker": "7 dni",
+  "expect": "either",
+  "facts": [
+   "7"
+  ]
+ },
+ {
+  "id": 12,
+  "subject": "Payment methods",
+  "body": "Can I pay with BLIK or PayPal?",
+  "language": "en",
+  "document": "test-platnosci-i-faktury.txt",
+  "marker": "BLIK",
+  "expect": "resolve",
+  "facts": [
+   "BLIK",
+   "PayPal"
+  ]
+ },
+ {
+  "id": 13,
+  "subject": "Student discount",
+  "body": "Do you offer discounts for students?",
+  "language": "en",
+  "document": "test-platnosci-i-faktury.txt",
+  "marker": "20%",
+  "expect": "resolve",
+  "facts": [
+   "20"
+  ]
+ },
+ {
+  "id": 14,
+  "subject": "Rabat na kilka kursów",
+  "body": "Chcę kupić trzy kursy naraz. Czy dostanę jakiś rabat?",
+  "language": "pl",
+  "document": "test-platnosci-i-faktury.txt",
+  "marker": "15%",
+  "expect": "resolve",
+  "facts": [
+   "15"
+  ]
+ },
+ {
+  "id": 15,
+  "subject": "Raty",
+  "body": "Czy mogę rozłożyć na raty kurs Python dla początkujących za 349 zł?",
+  "language": "pl",
+  "document": "test-platnosci-i-faktury.txt",
+  "marker": "3 raty",
+  "expect": "resolve",
+  "facts": [
+   "500"
+  ]
+ },
+ {
+  "id": 16,
+  "subject": "Brak dostępu po przelewie",
+  "body": "Zapłaciłem wczoraj zwykłym przelewem i nadal nie mam dostępu do kursu.",
+  "language": "pl",
+  "document": "test-platnosci-i-faktury.txt",
+  "marker": "2 dni robocz",
+  "expect": "resolve",
+  "facts": [
+   "2 dni"
+  ]
+ },
+ {
+  "id": 17,
+  "subject": "Installments rejected",
+  "body": "My PayPo installment application was rejected. Can you help?",
+  "language": "en",
+  "document": "test-platnosci-i-faktury.txt",
+  "marker": "PayPo",
+  "expect": "resolve",
+  "facts": [
+   "PayPo"
+  ]
+ },
+ {
+  "id": 18,
+  "subject": "Zniżka studencka na Black Friday",
+  "body": "Czy mogę połączyć zniżkę studencką z promocją Black Friday?",
+  "language": "pl",
+  "document": "test-platnosci-i-faktury.txt",
+  "marker": "Black Friday",
+  "expect": "resolve",
+  "facts": [
+   "(?i)nie"
+  ]
+ },
+ {
+  "id": 19,
+  "subject": "Internet Explorer",
+  "body": "Does the course platform work in Internet Explorer?",
+  "language": "en",
+  "document": "test-technical-requirements.txt",
+  "marker": "Internet Explorer",
+  "expect": "resolve",
+  "facts": [
+   "(?i)not supported|doesn't|does not|isn't|is not"
+  ]
+ },
+ {
+  "id": 20,
+  "subject": "Prędkość internetu",
+  "body": "Jaka prędkość internetu jest potrzebna, żeby oglądać kursy w 1080p?",
+  "language": "pl",
+  "document": "test-technical-requirements.txt",
+  "marker": "5 Mbps",
+  "expect": "resolve",
+  "facts": [
+   "5\\s*Mb"
+  ]
+ },
+ {
+  "id": 21,
+  "subject": "Aplikacja Android",
+  "body": "Mam telefon z Androidem 9. Czy aplikacja zadziała?",
+  "language": "pl",
+  "document": "test-technical-requirements.txt",
+  "marker": "Android 10",
+  "expect": "resolve",
+  "facts": [
+   "10"
+  ]
+ },
+ {
+  "id": 22,
+  "subject": "No access to source code",
+  "body": "I can't open the GitHub repository with the course source code.",
+  "language": "en",
+  "document": "test-technical-requirements.txt",
+  "marker": "GitHub username",
+  "expect": "resolve",
+  "facts": [
+   "(?i)github",
+   "(?i)1 hour|an hour|one hour"
+  ]
+ },
+ {
+  "id": 23,
+  "subject": "Zgubiony telefon 2FA",
+  "body": "Zgubiłem telefon z aplikacją do weryfikacji dwuetapowej i nie mogę się zalogować.",
+  "language": "pl",
+  "document": "test-technical-requirements.txt",
+  "marker": "backup codes",
+  "expect": "escalate",
+  "facts": []
+ },
+ {
+  "id": 24,
+  "subject": "Node version",
+  "body": "Which Node.js version do I need for the JavaScript course projects?",
+  "language": "en",
+  "document": "test-technical-requirements.txt",
+  "marker": "Node.js 22",
+  "expect": "resolve",
+  "facts": [
+   "22"
+  ]
+ },
+ {
+  "id": 25,
+  "subject": "Offline w aplikacji",
+  "body": "Czy w aplikacji mobilnej mogę pobrać filmy i oglądać je offline w samolocie?",
+  "language": "pl",
+  "document": "test-technical-requirements.txt",
+  "marker": "offline",
+  "expect": "resolve",
+  "facts": [
+   "(?i)nie"
+  ]
+ },
+ {
+  "id": 26,
+  "subject": "Mentoring",
+  "body": "Chcę zapisać się na mentoring 1 na 1. Jak to zrobić i ile kosztuje?",
+  "language": "pl",
+  "document": "test-mentoring-program.txt",
+  "marker": "249",
+  "expect": "resolve",
+  "facts": [
+   "249",
+   "Pro"
+  ]
+ },
+ {
+  "id": 27,
+  "subject": "Extra mentoring sessions",
+  "body": "I'm on the Pro plan and used my 2 included sessions this month. How much is another one?",
+  "language": "en",
+  "document": "test-mentoring-program.txt",
+  "marker": "199",
+  "expect": "resolve",
+  "facts": [
+   "199"
+  ]
+ },
+ {
+  "id": 28,
+  "subject": "Odwołanie sesji",
+  "body": "Muszę odwołać sesję mentoringową, która zaczyna się za 10 godzin. Czy zapłacę?",
+  "language": "pl",
+  "document": "test-mentoring-program.txt",
+  "marker": "24 hours",
+  "expect": "resolve",
+  "facts": [
+   "24"
+  ]
+ },
+ {
+  "id": 29,
+  "subject": "Mentoring with one course",
+  "body": "I only bought the Python course. Can I book a mentoring session?",
+  "language": "en",
+  "document": "test-mentoring-program.txt",
+  "marker": "Pro plan or a course bundle",
+  "expect": "resolve",
+  "facts": [
+   "Pro"
+  ]
+ },
+ {
+  "id": 30,
+  "subject": "Limit sesji",
+  "body": "Ile sesji mentoringu mogę zarezerwować w jednym miesiącu?",
+  "language": "pl",
+  "document": "test-mentoring-program.txt",
+  "marker": "at most 4",
+  "expect": "resolve",
+  "facts": [
+   "4"
+  ]
+ },
+ {
+  "id": 31,
+  "subject": "Cena React",
+  "body": "Ile kosztuje kurs React?",
+  "language": "pl",
+  "document": "test-course-catalog.txt",
+  "marker": "React w praktyce",
+  "expect": "resolve",
+  "facts": [
+   "499"
+  ]
+ },
+ {
+  "id": 32,
+  "subject": "Kotlin course",
+  "body": "Do you have a Kotlin course for Android?",
+  "language": "en",
+  "document": "test-course-catalog.txt",
+  "marker": "Kotlin",
+  "expect": "resolve",
+  "facts": [
+   "(?i)no plans|not plan|don't have|do not have"
+  ]
+ },
+ {
+  "id": 33,
+  "subject": "TypeScript",
+  "body": "Kiedy pojawi się kurs TypeScript?",
+  "language": "pl",
+  "document": "test-course-catalog.txt",
+  "marker": "March 2027",
+  "expect": "resolve",
+  "facts": [
+   "2027"
+  ]
+ },
+ {
+  "id": 34,
+  "subject": "Full-Stack bundle",
+  "body": "What's in the Full-Stack bundle and how much does it cost?",
+  "language": "en",
+  "document": "test-course-catalog.txt",
+  "marker": "1099",
+  "expect": "resolve",
+  "facts": [
+   "1099|1 099"
+  ]
+ },
+ {
+  "id": 35,
+  "subject": "React dla początkujących",
+  "body": "Nigdy nie programowałem. Czy mogę zacząć od kursu React?",
+  "language": "pl",
+  "document": "test-course-catalog.txt",
+  "marker": "React w praktyce",
+  "expect": "resolve",
+  "facts": [
+   "JavaScript"
+  ]
+ },
+ {
+  "id": 36,
+  "subject": "Aplikacja się wywala",
+  "body": "Moja aplikacja mobilna do zdjęć wywala się przy wysyłaniu zdjęcia na serwer.",
+  "language": "pl",
+  "document": null,
+  "marker": null,
+  "expect": "escalate",
+  "facts": []
+ },
+ {
+  "id": 37,
+  "subject": "Job guarantee",
+  "body": "Do you guarantee a job after I finish the courses?",
+  "language": "en",
+  "document": null,
+  "marker": null,
+  "expect": "escalate",
+  "facts": []
+ },
+ {
+  "id": 38,
+  "subject": "Sąd",
+  "body": "Jeśli nie oddacie mi pieniędzy w tym tygodniu, idę z tym do sądu.",
+  "language": "pl",
+  "document": null,
+  "marker": null,
+  "expect": "escalate",
+  "facts": []
+ },
+ {
+  "id": 39,
+  "subject": "Suspicious login",
+  "body": "Someone logged into my account from another country yesterday. What should I do?",
+  "language": "en",
+  "document": null,
+  "marker": null,
+  "expect": "escalate",
+  "facts": []
+ },
+ {
+  "id": 40,
+  "subject": "Podwójne obciążenie",
+  "body": "Bank pokazuje podwójne obciążenie za kurs. Złożyłem reklamację w banku.",
+  "language": "pl",
+  "document": null,
+  "marker": null,
+  "expect": "escalate",
+  "facts": []
+ },
+ {
+  "id": 41,
+  "subject": "Cash payment",
+  "body": "Can I pay in cash at your office?",
+  "language": "en",
+  "document": "test-platnosci-i-faktury.txt",
+  "marker": "gotówką",
+  "expect": "resolve",
+  "facts": [
+   "(?i)cash|not accept|don't accept|do not accept"
+  ]
+ },
+ {
+  "id": 42,
+  "subject": "Node i raty",
+  "body": "Ile kosztuje kurs Node.js i czy mogę zapłacić za niego w ratach?",
+  "language": "pl",
+  "document": "test-course-catalog.txt",
+  "marker": "Node.js i Express",
+  "expect": "resolve",
+  "facts": [
+   "449",
+   "500"
+  ]
+ },
+ {
+  "id": 43,
+  "subject": "SQL i zniżka nauczycielska",
+  "body": "Ile kosztuje kurs SQL i czy jest zniżka dla nauczycieli?",
+  "language": "pl",
+  "document": "test-course-catalog.txt",
+  "marker": "SQL i bazy danych",
+  "expect": "escalate",
+  "facts": []
+ },
+ {
+  "id": 44,
+  "subject": "Pytanie o kurs Javy",
+  "body": "Czy macie kurs Java Spring?",
+  "language": "pl",
+  "document": "test-course-catalog.txt",
+  "marker": "Kotlin, Swift, Java",
+  "expect": "resolve",
+  "facts": [
+   "(?i)nie"
+  ]
+ }
+]

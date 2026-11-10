@@ -44,7 +44,7 @@ async function expectLoginPage() {
 
 describe('App routing', () => {
   describe('without a session', () => {
-    it.each(['/', '/tickets', '/tickets/7', '/users', '/no-such-page'])('sends %s to the login page', async (route) => {
+    it.each(['/', '/tickets', '/tickets/7', '/users', '/rag', '/no-such-page'])('sends %s to the login page', async (route) => {
       mockSession(null)
       renderWithRouter(<App />, route)
 
@@ -109,6 +109,57 @@ describe('App routing', () => {
     expect(get).toHaveBeenCalledWith('/api/users')
     expect(screen.getByRole('link', { name: 'Users' })).toHaveAttribute('href', '/users')
     expect(screen.queryByRole('heading', { name: 'Dashboard' })).not.toBeInTheDocument()
+  })
+
+  it('sends an agent from /rag to the dashboard, with no Knowledge base link', async () => {
+    const get = vi.spyOn(axios, 'get').mockImplementation(async (url: string) =>
+      url === '/api/tickets/stats' ? { data: stats } : { data: { documents: [] } },
+    )
+    mockSession({ name: 'Alan Agent', role: Role.agent })
+    renderWithRouter(<App />, '/rag')
+
+    expect(await screen.findByRole('heading', { name: 'Dashboard', level: 1 })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Knowledge base' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Knowledge base' })).not.toBeInTheDocument()
+    expect(get).not.toHaveBeenCalledWith('/api/rag/documents')
+  })
+
+  it('shows the Knowledge base page to an admin on /rag', async () => {
+    const get = vi.spyOn(axios, 'get').mockResolvedValue({
+      data: {
+        documents: [
+          {
+            id: '6f1c2a3e-1b2c-4d5e-8f90-123456789abc',
+            filename: 'Refund policy.pdf',
+            size: 2_621_440,
+            chunkCount: 14,
+            createdAt: '2026-10-02T12:00:00.000Z',
+          },
+        ],
+      },
+    })
+    mockSession({ name: 'Ada Admin', role: Role.admin })
+    renderWithRouter(<App />, '/rag')
+
+    expect(screen.getByRole('heading', { name: 'Knowledge base', level: 1 })).toBeInTheDocument()
+    expect(await screen.findByRole('cell', { name: 'Refund policy.pdf' })).toBeInTheDocument()
+    expect(get).toHaveBeenCalledWith('/api/rag/documents')
+    expect(screen.queryByRole('heading', { name: 'Dashboard' })).not.toBeInTheDocument()
+  })
+
+  it('takes an admin from the Knowledge base link to /rag', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(axios, 'get').mockImplementation(async (url: string) =>
+      url === '/api/tickets/stats' ? { data: stats } : { data: { documents: [] } },
+    )
+    mockSession({ name: 'Ada Admin', role: Role.admin })
+    renderWithRouter(<App />, '/')
+    expect(await screen.findByRole('heading', { name: 'Dashboard', level: 1 })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('link', { name: 'Knowledge base' }))
+
+    expect(await screen.findByRole('heading', { name: 'Knowledge base', level: 1 })).toBeInTheDocument()
+    expect(await screen.findByText('No documents yet.')).toBeInTheDocument()
   })
 
   it.each([

@@ -33,6 +33,12 @@ Versions reflect the installed dependencies as of 2026-09-17. Sections marked **
 
 - pg-boss 12: a job queue stored in PostgreSQL (its own `pgboss` schema), used for AI classification of new tickets
 
+## Knowledge base (RAG)
+
+- A separate Python 3.12 service in `rag/` (managed with `uv`): FastAPI, LangChain (`langchain-postgres` `PGVectorStore`, `langchain-openai`, `langchain-text-splitters`), `pypdf`
+- pgvector in its own PostgreSQL database (`helpdesk_rag`); OpenAI `text-embedding-3-small` embeddings
+- pytest, against `helpdesk_rag_test` with fake embeddings
+
 ## ORM
 
 - Prisma 7 with the `@prisma/adapter-pg` driver adapter (`pg` 8)

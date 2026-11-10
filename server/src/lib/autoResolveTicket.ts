@@ -1,19 +1,19 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { EmailStatus, ReplySender, TicketStatus } from "../../generated/prisma/enums";
-import { autoResolveTicket } from "./ai";
+import { autoResolveTicket, isAiConfigured } from "./ai";
 import { AI_AGENT_ID } from "./aiAgent";
 import type { NewTicket } from "./classifyTicket";
 import { prisma } from "./db";
-import { isMailerConfigured } from "./env";
+import { isMailerConfigured, isRagConfigured } from "./env";
+import { searchKnowledge } from "./rag";
 
-// Read on every job, so an edit takes effect without a restart.
-const KNOWLEDGE_BASE_PATH = join(import.meta.dirname, "../../knowledge-base/knowledge-base.md");
+// Auto-resolving needs the model and the knowledge base. Without either, new tickets go straight to
+// the agents (classification needs only the model).
+export const isAutoResolveConfigured = isAiConfigured && isRagConfigured;
 
 // Statuses the AI may still move a ticket out of: anything else means an agent already changed it.
 const AI_STATUSES = [TicketStatus.new, TicketStatus.processing];
 
-// Tries to resolve a new ticket from the knowledge base, as the auto-resolve-ticket job
+// Tries to resolve a new ticket from the knowledge base (the rag service), as the auto-resolve-ticket job
 // (lib/queue.ts). The ticket is assigned to the AI agent from the webhook and processing while the
 // model works, then resolved with an AI reply (still assigned to the AI), or open and unassigned
 // for an agent. Returns the id of the AI reply, for queue.ts to email; null when nothing was
@@ -27,7 +27,9 @@ export async function autoResolveNewTicket(ticket: NewTicket, lastAttempt: boole
   if (count === 0) return null;
 
   try {
-    const { resolved, reply } = await autoResolveTicket(ticket, await readFile(KNOWLEDGE_BASE_PATH, "utf8"));
+    // Nothing close enough in the knowledge base: no use asking the model.
+    const knowledge = await searchKnowledge(`${ticket.subject}\n\n${ticket.body}`);
+    const { resolved, reply } = knowledge ? await autoResolveTicket(ticket, knowledge) : { resolved: false, reply: "" };
     // Only while still processing, so a status an agent set in the meantime is kept.
     const stillProcessing = { id: ticket.id, status: TicketStatus.processing };
     if (!resolved) {
