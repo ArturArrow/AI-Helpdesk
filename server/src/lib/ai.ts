@@ -198,7 +198,7 @@ export async function autoResolveTicket(
   knowledgeBase: string,
 ): Promise<AutoResolution> {
   const prompt = [
-    // The knowledge base is ours, so it isn't escaped, unlike the ticket.
+    // The knowledge base comes from documents an admin added, so it isn't escaped, unlike the ticket.
     `<knowledge-base>\n${knowledgeBase}\n</knowledge-base>`,
     ...threadPrompt({ ...ticket, replies: [] }),
     `<reply-details>\nCustomer first name: ${contextText(firstName(ticket.senderName))}\nWebsite: ${SIGNATURE_URL}\n</reply-details>`,
