@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, mock } from "bun:test";
 import { MockLanguageModelV4 } from "ai/test";
 import { categoryLabels } from "core/constants/ticketCategory";
 import { ReplySender, TicketCategory } from "../../generated/prisma/enums";
+import { testEnv } from "./testEnv";
 
 // The model is replaced before ai.ts loads, so no test reaches OpenAI.
 let model: MockLanguageModelV4;
@@ -21,7 +22,7 @@ function answer(text: string) {
   });
 }
 
-mock.module("./env", () => ({ OPENAI_API_KEY: "test-key" }));
+mock.module("./env", () => testEnv);
 mock.module("@ai-sdk/openai", () => ({
   createOpenAI: () => (modelId: string) => {
     requestedModelIds.push(modelId);

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { EmailStatus } from "../../generated/prisma/enums";
+import { testEnv } from "./testEnv";
 
 // The database and the mailer's address are replaced before sendReplyEmail.ts loads, so no test
 // needs Postgres or reaches a mailer.
@@ -15,12 +16,7 @@ let earlier: { messageId: string }[];
 const update = mock(async (_args: unknown) => ({}));
 const updateMany = mock(async (_args: unknown) => ({ count: 1 }));
 
-// mock.module is global across test files, so this also carries what ai.test.ts needs from ./env.
-mock.module("./env", () => ({
-  OPENAI_API_KEY: "test-key",
-  MAILER_URL: "http://mailer.test",
-  MAILER_SECRET: "mailer-secret",
-}));
+mock.module("./env", () => testEnv);
 mock.module("./db", () => ({
   prisma: {
     reply: {

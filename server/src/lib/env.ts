@@ -20,3 +20,8 @@ export const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 export const MAILER_URL = process.env.MAILER_URL;
 export const MAILER_SECRET = process.env.MAILER_SECRET;
 export const isMailerConfigured = Boolean(MAILER_URL && MAILER_SECRET);
+// The rag service (rag/) that stores the knowledge base's documents. Optional: without both,
+// /api/rag answers 503.
+export const RAG_URL = process.env.RAG_URL;
+export const RAG_SECRET = process.env.RAG_SECRET;
+export const isRagConfigured = Boolean(RAG_URL && RAG_SECRET);
