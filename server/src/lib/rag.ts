@@ -66,7 +66,9 @@ export async function deleteRagDocument(id: string): Promise<void> {
 // How auto-resolve searches the knowledge base. With text-embedding-3-small, scores of questions the
 // knowledge base answers and of ones it doesn't overlap (about 0.27-0.59 against 0.20-0.37 on the
 // support FAQ), so the floor only drops clearly unrelated tickets; the model decides the rest.
-export const KNOWLEDGE_EXCERPTS = 5;
+// 8 excerpts, not 5: a Polish question about an English document ranked its answer 6th or 7th,
+// behind Polish chunks on other topics, and the ticket was escalated for want of it.
+export const KNOWLEDGE_EXCERPTS = 8;
 export const MIN_KNOWLEDGE_SCORE = 0.25;
 // The rag service's limit on a query.
 const MAX_QUERY_LENGTH = 8000;

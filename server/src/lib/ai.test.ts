@@ -287,6 +287,15 @@ describe("autoResolveTicket", () => {
     });
   });
 
+  it("tells the model to answer in the ticket's language, not the knowledge base's", async () => {
+    model = answer('{"resolved":false,"reply":""}');
+    await autoResolveTicket(newTicket, knowledgeBase);
+
+    const { system } = sentPrompt();
+    expect(system).toContain("in the language of the ticket's subject and body");
+    expect(system).toContain("translate what you use from it");
+  });
+
   it("tells the model to escalate on each of the escalation rules", async () => {
     model = answer('{"resolved":false,"reply":""}');
     await autoResolveTicket(newTicket, knowledgeBase);
