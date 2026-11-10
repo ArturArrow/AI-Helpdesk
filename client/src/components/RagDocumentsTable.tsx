@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import axios from 'axios'
 import type { RagDocument } from 'core/constants/rag'
+import DeleteRagDocumentDialog from '@/components/DeleteRagDocumentDialog.tsx'
 import { Skeleton } from '@/components/ui/skeleton.tsx'
 import {
   Table,
@@ -37,6 +38,9 @@ function RagDocumentsTable() {
           <TableHead>Size</TableHead>
           <TableHead>Chunks</TableHead>
           <TableHead>Added</TableHead>
+          <TableHead>
+            <span className="sr-only">Actions</span>
+          </TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -49,6 +53,11 @@ function RagDocumentsTable() {
                 <TableCell>{formatSize(document.size)}</TableCell>
                 <TableCell>{document.chunkCount}</TableCell>
                 <TableCell>{new Date(document.createdAt).toLocaleDateString()}</TableCell>
+                <TableCell>
+                  <div className="flex justify-end">
+                    <DeleteRagDocumentDialog document={document} />
+                  </div>
+                </TableCell>
               </TableRow>
             ))
           : Array.from({ length: 3 }, (_, i) => (
@@ -57,6 +66,7 @@ function RagDocumentsTable() {
                 <TableCell><Skeleton className="h-4 w-14" /></TableCell>
                 <TableCell><Skeleton className="h-4 w-8" /></TableCell>
                 <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                <TableCell><Skeleton className="ml-auto h-7 w-7" /></TableCell>
               </TableRow>
             ))}
       </TableBody>
