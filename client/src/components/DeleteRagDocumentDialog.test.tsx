@@ -13,6 +13,7 @@ const ragDocument: RagDocument = {
   size: 2_621_440,
   chunkCount: 14,
   createdAt: '2026-10-02T12:00:00.000Z',
+  hasFile: true,
 }
 
 // Confirming and the refetch that removes the row are covered with the table in RagPage.test.tsx.

@@ -11,6 +11,7 @@ const {
   RagServiceError,
   addRagDocument,
   deleteRagDocument,
+  downloadRagDocument,
   listRagDocuments,
   searchKnowledge,
 } = await import("./rag");
@@ -20,6 +21,7 @@ const document = {
   filename: "zwroty.pdf",
   size: 3,
   chunkCount: 1,
+  hasFile: true,
   createdAt: "2026-11-10T10:00:00+00:00",
 };
 
@@ -73,6 +75,31 @@ describe("addRagDocument", () => {
     expect(file.name).toBe("zwroty.pdf");
     expect(file.type).toBe("application/pdf");
     expect(new Uint8Array(await file.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
+  });
+});
+
+describe("downloadRagDocument", () => {
+  it("fetches the file with the secret and decodes its name", async () => {
+    fetchSpy.mockResolvedValue(
+      new Response(new Uint8Array([37, 80, 68, 70]), {
+        status: 200,
+        headers: { "Content-Type": "application/octet-stream", "X-Filename": "regulamin%20zwrot%C3%B3w.pdf" },
+      }),
+    );
+
+    const file = await downloadRagDocument(document.id);
+
+    expect(file.filename).toBe("regulamin zwrotów.pdf");
+    expect([...file.data]).toEqual([37, 80, 68, 70]);
+    const { url, headers } = sent();
+    expect(url).toBe(`http://rag.test/documents/${document.id}/file`);
+    expect(headers.get("X-Rag-Secret")).toBe("rag-secret");
+  });
+
+  it("passes on a 404 for a document without a file", async () => {
+    fetchSpy.mockResolvedValue(json(404, { detail: "Document not found." }));
+
+    await expect(downloadRagDocument(document.id)).rejects.toMatchObject({ status: 404, message: "Document not found." });
   });
 });
 

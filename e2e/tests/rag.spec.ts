@@ -23,6 +23,7 @@ const endpoints: [string, (request: APIRequestContext) => ReturnType<APIRequestC
         },
       }),
   ],
+  ['GET /api/rag/documents/:id/file', (request) => request.get(`/api/rag/documents/${DOCUMENT_ID}/file`)],
   ['DELETE /api/rag/documents/:id', (request) => request.delete(`/api/rag/documents/${DOCUMENT_ID}`)],
 ]
 

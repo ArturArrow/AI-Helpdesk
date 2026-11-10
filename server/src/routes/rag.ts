@@ -3,7 +3,7 @@ import multer from "multer";
 import { MAX_RAG_DOCUMENT_BYTES } from "core/constants/rag";
 import { ragDocumentParamsSchema } from "core/schemas/rag";
 import { isRagConfigured } from "../lib/env";
-import { addRagDocument, deleteRagDocument, listRagDocuments } from "../lib/rag";
+import { addRagDocument, deleteRagDocument, downloadRagDocument, listRagDocuments } from "../lib/rag";
 import { validateParams } from "../lib/validate";
 
 // The knowledge base's documents, kept by the rag service (rag/). Mounted behind requireAuth and
@@ -47,6 +47,23 @@ ragRouter.post("/documents", uploadDocument, async (req, res) => {
     data: req.file.buffer,
   });
   res.status(201).json({ document });
+});
+
+// Always as a download, never shown on our origin, like a ticket's attachments: the file is whatever
+// an admin uploaded.
+ragRouter.get("/documents/:id/file", async (req, res) => {
+  const params = validateParams(ragDocumentParamsSchema, req, res);
+  if (!params) return;
+  const { filename, data } = await downloadRagDocument(params.id);
+  // res.attachment sets a type from the file's extension, so the type has to come after it.
+  res.attachment(filename);
+  res.set({
+    "Content-Type": "application/octet-stream",
+    "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": "sandbox",
+    "Cache-Control": "private",
+  });
+  res.send(data);
 });
 
 ragRouter.delete("/documents/:id", async (req, res) => {

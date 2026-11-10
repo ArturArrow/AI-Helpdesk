@@ -59,6 +59,15 @@ export async function addRagDocument(file: { filename: string; contentType: stri
   return (await res.json()) as RagDocument;
 }
 
+// The original file. The service sends the name percent-encoded in X-Filename.
+export async function downloadRagDocument(id: string): Promise<{ filename: string; data: Buffer }> {
+  const res = await call(`/documents/${encodeURIComponent(id)}/file`);
+  return {
+    filename: decodeURIComponent(res.headers.get("X-Filename") ?? "document"),
+    data: Buffer.from(await res.arrayBuffer()),
+  };
+}
+
 export async function deleteRagDocument(id: string): Promise<void> {
   await call(`/documents/${encodeURIComponent(id)}`, { method: "DELETE" });
 }

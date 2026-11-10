@@ -11,4 +11,6 @@ export interface RagDocument {
   size: number;
   chunkCount: number;
   createdAt: string;
+  // Whether the original file is stored, for downloading. False for documents added before it was.
+  hasFile: boolean;
 }

@@ -1,7 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 import axios from 'axios'
 import type { RagDocument } from 'core/constants/rag'
+import { DownloadIcon } from 'lucide-react'
 import DeleteRagDocumentDialog from '@/components/DeleteRagDocumentDialog.tsx'
+import { buttonVariants } from '@/components/ui/button.tsx'
 import { Skeleton } from '@/components/ui/skeleton.tsx'
 import {
   Table,
@@ -54,7 +56,18 @@ function RagDocumentsTable() {
                 <TableCell>{document.chunkCount}</TableCell>
                 <TableCell>{new Date(document.createdAt).toLocaleDateString()}</TableCell>
                 <TableCell>
-                  <div className="flex justify-end">
+                  <div className="flex justify-end gap-1">
+                    {/* The server sends it as an attachment, so the link downloads it. Documents
+                        added before originals were kept have nothing to download. */}
+                    {document.hasFile && (
+                      <a
+                        href={`/api/rag/documents/${document.id}/file`}
+                        aria-label={`Download ${document.filename}`}
+                        className={buttonVariants({ variant: 'ghost', size: 'icon-sm' })}
+                      >
+                        <DownloadIcon />
+                      </a>
+                    )}
                     <DeleteRagDocumentDialog document={document} />
                   </div>
                 </TableCell>
@@ -66,7 +79,7 @@ function RagDocumentsTable() {
                 <TableCell><Skeleton className="h-4 w-14" /></TableCell>
                 <TableCell><Skeleton className="h-4 w-8" /></TableCell>
                 <TableCell><Skeleton className="h-4 w-20" /></TableCell>
-                <TableCell><Skeleton className="ml-auto h-7 w-7" /></TableCell>
+                <TableCell><Skeleton className="ml-auto h-7 w-15" /></TableCell>
               </TableRow>
             ))}
       </TableBody>

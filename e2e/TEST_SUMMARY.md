@@ -3,8 +3,8 @@
 ## Last run
 
 - **Date:** 2026-11-10
-- **Discovered (`--list`):** 471 tests in 10 files.
-- **Result:** 471 passed, 0 failed (1.4m), after switching auto-resolve to the rag service (the webhook now needs both OpenAI and the rag service to auto-resolve).
+- **Discovered (`--list`):** 474 tests in 10 files.
+- **Result:** 474 passed, 0 failed (1.9m), after adding the `GET /api/rag/documents/:id/file` guard tests.
 
 ## tests/login.spec.ts
 
@@ -404,7 +404,7 @@ GET `/api/tickets/stats` (`{ total, open, resolvedByAi, averageResolutionMs, tic
 
 ## tests/rag.spec.ts
 
-The `/api/rag` guards at the API level. `server/.env.test` sets neither `RAG_URL` nor `RAG_SECRET`, so a request past `requireAuth` and `requireAdmin` gets the router's 503, which shows it got through both guards. For each of GET `/api/rag/documents`, POST `/api/rag/documents` (multipart, a small `.txt` as `file`) and DELETE `/api/rag/documents/:id` (a well-formed UUID):
+The `/api/rag` guards at the API level. `server/.env.test` sets neither `RAG_URL` nor `RAG_SECRET`, so a request past `requireAuth` and `requireAdmin` gets the router's 503, which shows it got through both guards. For each of GET `/api/rag/documents`, POST `/api/rag/documents` (multipart, a small `.txt` as `file`), GET `/api/rag/documents/:id/file` and DELETE `/api/rag/documents/:id` (both with a well-formed UUID):
 
 - 401 `{"error":"Unauthorized"}` without a session.
 - 403 `{"error":"Forbidden"}` for the agent.
@@ -485,7 +485,7 @@ The `/api/rag` guards at the API level. `server/.env.test` sets neither `RAG_URL
 - **Filenames passed to the AI jobs:** the webhook adds them to the queued job only with `OPENAI_API_KEY`, so that needs server unit tests.
 - **Concurrent redelivery with attachments:** only sequential redelivery is tested; the P2002 path can't be forced from a serial test.
 - **Attachments going with their ticket:** the cascade is only exercised by the stats tests' table wipe, which checks nothing about attachments, and there is no endpoint that deletes tickets.
-- **The rag proxy itself:** listing, uploading and deleting documents, upload errors (400/413), and the DELETE id validation need a running rag service, or at least `RAG_URL`/`RAG_SECRET` on the test server; E2E runs without them, and the router's 503 answers before any of that. The proxy logic is in `server/src/lib/rag.test.ts`. Testing it end to end would need a stub rag service and a separate `webServer` with those variables.
+- **The rag proxy itself:** listing, uploading, downloading (`GET /api/rag/documents/:id/file`: the file, its `Content-Disposition`/`nosniff`/`CSP: sandbox` headers, a missing document) and deleting documents, upload errors (400/413), and the id validation on DELETE and the file download need a running rag service, or at least `RAG_URL`/`RAG_SECRET` on the test server; E2E runs without them, and the router's 503 answers before any of that. The proxy logic is in `server/src/lib/rag.test.ts`. Testing it end to end would need a stub rag service and a separate `webServer` with those variables.
 - **Not built yet:** an inbound email provider adapter, restoring a deleted user, ticket creation through the API and updates to content (subject, body; PATCH ignores unknown fields), AI features other than reply polishing, ticket summaries, classification and auto-resolving, and email.
 
 ## Open questions

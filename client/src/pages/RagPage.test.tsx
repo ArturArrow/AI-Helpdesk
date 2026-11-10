@@ -14,6 +14,7 @@ const documents: RagDocument[] = [
     size: 2_621_440,
     chunkCount: 14,
     createdAt: '2026-10-02T12:00:00.000Z',
+    hasFile: true,
   },
   {
     id: '0a9b8c7d-6e5f-4a3b-9c2d-0123456789ab',
@@ -21,6 +22,8 @@ const documents: RagDocument[] = [
     size: 3_584,
     chunkCount: 2,
     createdAt: '2026-09-20T12:00:00.000Z',
+    // Added before originals were kept, so there is nothing to download.
+    hasFile: false,
   },
 ]
 
@@ -70,12 +73,33 @@ describe('RagPage', () => {
       'Added',
       'Actions',
     ])
-    // The actions cell holds only an icon button, so it has no text.
+    // The actions cell holds only icon buttons and links, so it has no text.
     expect(bodyRows()).toEqual([
       ['Refund policy.pdf', '2.5 MB', '14', new Date(documents[0]!.createdAt).toLocaleDateString(), ''],
       ['shipping.txt', '4 KB', '2', new Date(documents[1]!.createdAt).toLocaleDateString(), ''],
     ])
     expect(screen.getByRole('button', { name: 'Delete Refund policy.pdf' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Delete shipping.txt' })).toBeInTheDocument()
+  })
+
+  it('links to the original file of a document that has one', async () => {
+    vi.spyOn(axios, 'get').mockResolvedValue({ data: { documents } })
+    renderWithQuery(<RagPage />)
+
+    expect(await screen.findByRole('link', { name: 'Download Refund policy.pdf' })).toHaveAttribute(
+      'href',
+      `/api/rag/documents/${documents[0]!.id}/file`,
+    )
+  })
+
+  it('shows no download link for a document without its original file, but keeps its delete button', async () => {
+    vi.spyOn(axios, 'get').mockResolvedValue({ data: { documents } })
+    renderWithQuery(<RagPage />)
+
+    await screen.findByRole('cell', { name: 'shipping.txt' })
+    expect(screen.queryByRole('link', { name: 'Download shipping.txt' })).not.toBeInTheDocument()
+    // Only the document with a file has a link at all.
+    expect(screen.getAllByRole('link')).toHaveLength(1)
     expect(screen.getByRole('button', { name: 'Delete shipping.txt' })).toBeInTheDocument()
   })
 
@@ -111,6 +135,7 @@ describe('RagPage', () => {
       size: 512,
       chunkCount: 1,
       createdAt: '2026-11-10T08:00:00.000Z',
+      hasFile: true,
     }
     vi.spyOn(axios, 'post').mockResolvedValue({ status: 201, data: { document: added } })
     renderWithQuery(<RagPage />)
@@ -121,6 +146,10 @@ describe('RagPage', () => {
     expect(await screen.findByRole('cell', { name: 'FAQ.txt' })).toBeInTheDocument()
     expect(bodyRows().map((cells) => cells[0])).toEqual(['FAQ.txt', 'Refund policy.pdf', 'shipping.txt'])
     expect(bodyRows()[0]).toEqual(['FAQ.txt', '512 B', '1', new Date(added.createdAt).toLocaleDateString(), ''])
+    expect(screen.getByRole('link', { name: 'Download FAQ.txt' })).toHaveAttribute(
+      'href',
+      `/api/rag/documents/${added.id}/file`,
+    )
     expect(get).toHaveBeenCalledTimes(1)
   })
 
