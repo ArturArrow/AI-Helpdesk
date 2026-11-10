@@ -4,7 +4,7 @@
 
 - **Date:** 2026-11-10
 - **Discovered (`--list`):** 471 tests in 10 files.
-- **Result:** 471 passed, 0 failed (1.6m), after adding `rag.spec.ts`.
+- **Result:** 471 passed, 0 failed (1.5m), after adding the client's `/rag` page and its navbar link.
 
 ## tests/login.spec.ts
 
