@@ -8,7 +8,9 @@ from pypdf.errors import PyPdfError
 
 ALLOWED_EXTENSIONS = {".pdf", ".txt"}
 
-_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+# Small enough that a chunk holds about one question and answer of a support FAQ: at 1000, chunks
+# mixed several and matched every question about equally. Changing it means re-adding the documents.
+_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
 
 
 # The file can't be turned into text. The message is shown to the admin who uploaded it.

@@ -37,7 +37,7 @@ def test_txt_in_another_encoding_is_rejected():
 def test_long_text_is_split_with_chunks_within_the_size():
     chunks = to_chunks("long.txt", ("word " * 1000).encode())
     assert len(chunks) > 1
-    assert all(len(chunk.page_content) <= 1000 for chunk in chunks)
+    assert all(len(chunk.page_content) <= 500 for chunk in chunks)
 
 
 def test_nul_is_removed():
