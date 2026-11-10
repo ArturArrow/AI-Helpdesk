@@ -5,7 +5,15 @@ import { testEnv } from "./testEnv";
 // a rag service.
 mock.module("./env", () => testEnv);
 
-const { RagServiceError, addRagDocument, deleteRagDocument, listRagDocuments } = await import("./rag");
+const {
+  KNOWLEDGE_EXCERPTS,
+  MIN_KNOWLEDGE_SCORE,
+  RagServiceError,
+  addRagDocument,
+  deleteRagDocument,
+  listRagDocuments,
+  searchKnowledge,
+} = await import("./rag");
 
 const document = {
   id: "8f8a3c1e-2b1d-4c3e-9f00-3a1b2c3d4e5f",
@@ -77,6 +85,63 @@ describe("deleteRagDocument", () => {
     const { url, init } = sent();
     expect(url).toBe(`http://rag.test/documents/${document.id}`);
     expect(init.method).toBe("DELETE");
+  });
+});
+
+describe("searchKnowledge", () => {
+  const chunk = (text: string, score: number) => ({ text, filename: "faq.txt", page: null, score });
+
+  it("asks for the closest excerpts with the secret", async () => {
+    fetchSpy.mockResolvedValue(json(200, { chunks: [] }));
+
+    await searchKnowledge("Refund\n\nI want my money back");
+
+    const { url, init, headers } = sent();
+    expect(url).toBe("http://rag.test/search");
+    expect(init.method).toBe("POST");
+    expect(headers.get("X-Rag-Secret")).toBe("rag-secret");
+    expect(headers.get("Content-Type")).toBe("application/json");
+    expect(JSON.parse(init.body as string)).toEqual({ query: "Refund\n\nI want my money back", k: KNOWLEDGE_EXCERPTS });
+  });
+
+  it("cuts a long query to the service's limit", async () => {
+    fetchSpy.mockResolvedValue(json(200, { chunks: [] }));
+
+    await searchKnowledge("a".repeat(9000));
+
+    expect(JSON.parse(sent().init.body as string).query).toHaveLength(8000);
+  });
+
+  it("joins the excerpts at or above the floor, best first, without file names", async () => {
+    fetchSpy.mockResolvedValue(
+      json(200, {
+        chunks: [
+          chunk("Refunds within 30 days.", 0.5),
+          chunk("Refunds take 5-10 days.", MIN_KNOWLEDGE_SCORE),
+          chunk("Videos stream online.", MIN_KNOWLEDGE_SCORE - 0.01),
+        ],
+      }),
+    );
+
+    expect(await searchKnowledge("refund")).toBe("Refunds within 30 days.\n\n---\n\nRefunds take 5-10 days.");
+  });
+
+  it("is null when nothing reaches the floor", async () => {
+    fetchSpy.mockResolvedValue(json(200, { chunks: [chunk("Videos stream online.", 0.1)] }));
+
+    expect(await searchKnowledge("mentoring")).toBeNull();
+  });
+
+  it("is null for an empty knowledge base", async () => {
+    fetchSpy.mockResolvedValue(json(200, { chunks: [] }));
+
+    expect(await searchKnowledge("refund")).toBeNull();
+  });
+
+  it("throws when the service fails, so the job is retried", async () => {
+    fetchSpy.mockResolvedValue(json(502, { detail: "The embeddings couldn't be created." }));
+
+    await expect(searchKnowledge("refund")).rejects.toMatchObject({ status: 502 });
   });
 });
 

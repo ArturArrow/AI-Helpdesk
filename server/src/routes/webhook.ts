@@ -6,7 +6,7 @@ import { isAiConfigured } from "../lib/ai";
 import { prisma } from "../lib/db";
 import { AI_AGENT_ID } from "../lib/aiAgent";
 import { toAttachmentRows } from "../lib/attachments";
-import { openForAgent } from "../lib/autoResolveTicket";
+import { isAutoResolveConfigured, openForAgent } from "../lib/autoResolveTicket";
 import { AUTO_RESOLVE_TICKET_QUEUE, boss, CLASSIFY_TICKET_QUEUE } from "../lib/queue";
 import { validate } from "../lib/validate";
 
@@ -84,14 +84,14 @@ webhookRouter.post("/inbound-email", async (req, res) => {
       return;
     }
 
-    // With AI, a ticket starts as new (hidden from the list) until the AI resolves it or opens it
-    // for an agent; without it, it's open straight away.
+    // With auto-resolving, a ticket starts as new (hidden from the list) until the AI resolves it or
+    // opens it for an agent; without it, it's open straight away.
     const ticket = await prisma.ticket.create({
       // The AI agent holds it while it tries to answer; openForAgent unassigns it if it can't.
       data: {
         ...fields,
         attachments: { create: attachmentRows },
-        ...(isAiConfigured
+        ...(isAutoResolveConfigured
           ? { status: TicketStatus.new, assignedToId: AI_AGENT_ID }
           : { status: TicketStatus.open }),
       },
@@ -101,14 +101,16 @@ webhookRouter.post("/inbound-email", async (req, res) => {
     // Classified and auto-resolved by background jobs: the provider shouldn't wait on the model, or
     // it may time out and redeliver. The ticket is already stored, so a queue failure only leaves it
     // unclassified, or opens it for an agent.
+    // The AI can't read the files, but it has to know they're there.
+    const job = { ...ticket, attachments: attachmentRows.map((row) => row.filename) };
     if (isAiConfigured) {
-      // The AI can't read the files, but it has to know they're there.
-      const job = { ...ticket, attachments: attachmentRows.map((row) => row.filename) };
       try {
         await boss.send(CLASSIFY_TICKET_QUEUE, job);
       } catch (error) {
         console.error(`[queue] couldn't queue classification of ticket ${ticket.id}:`, error);
       }
+    }
+    if (isAutoResolveConfigured) {
       try {
         await boss.send(AUTO_RESOLVE_TICKET_QUEUE, job);
       } catch (error) {

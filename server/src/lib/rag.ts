@@ -62,3 +62,32 @@ export async function addRagDocument(file: { filename: string; contentType: stri
 export async function deleteRagDocument(id: string): Promise<void> {
   await call(`/documents/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
+
+// How auto-resolve searches the knowledge base. With text-embedding-3-small, scores of questions the
+// knowledge base answers and of ones it doesn't overlap (about 0.27-0.59 against 0.20-0.37 on the
+// support FAQ), so the floor only drops clearly unrelated tickets; the model decides the rest.
+export const KNOWLEDGE_EXCERPTS = 5;
+export const MIN_KNOWLEDGE_SCORE = 0.25;
+// The rag service's limit on a query.
+const MAX_QUERY_LENGTH = 8000;
+
+interface SearchResult {
+  text: string;
+  filename: string;
+  page: number | null;
+  score: number;
+}
+
+// The parts of the knowledge base closest to the query, best first, as one text for the prompt.
+// Without file names, which the model could otherwise quote to the customer. Null when nothing
+// scores above the floor.
+export async function searchKnowledge(query: string): Promise<string | null> {
+  const res = await call("/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: query.slice(0, MAX_QUERY_LENGTH), k: KNOWLEDGE_EXCERPTS }),
+  });
+  const { chunks } = (await res.json()) as { chunks: SearchResult[] };
+  const excerpts = chunks.filter((chunk) => chunk.score >= MIN_KNOWLEDGE_SCORE).map((chunk) => chunk.text);
+  return excerpts.length > 0 ? excerpts.join("\n\n---\n\n") : null;
+}
