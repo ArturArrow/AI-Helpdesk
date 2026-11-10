@@ -62,11 +62,11 @@ Set resolved to false, with an empty reply, when:
 - the customer threatens legal action;
 - the customer asks for a refund more than 30 days after purchase;
 - the customer disputes a charge or mentions a chargeback;
-- the ticket involves account security (e.g. a hacked account, a login the customer doesn't recognize);
+- the ticket involves account security (e.g. a hacked account, a login the customer doesn't recognize, or a lost phone or other loss of access to two-factor authentication), even when the knowledge base describes what to do;
 - the ticket lists attachments and answering may depend on what's in them, since you can't see them;
 - you are not confident in the answer.
 Don't add facts, links, numbers or promises that aren't in the knowledge base.
-Write the whole reply, greeting and closing included, in the language of the ticket's subject and body. The knowledge base may be in another language: translate what you use from it. Neither its language nor the customer's name decides the reply's language.
+First set language to the language of the ticket's subject and body (e.g. English or Polish). Write the whole reply, greeting and closing included, in that language. The knowledge base may be in another language: translate what you use from it. Neither its language nor the customer's name decides the reply's language.
 Use a friendly, professional support tone.
 Write the reply as plain text, without Markdown (no **bold**, headings or bullet markers), even where the knowledge base uses it.
 Start with a short greeting that addresses the customer by the first name given in <reply-details>, and nothing else of their name.
@@ -186,12 +186,16 @@ export async function classifyTicket(ticket: Omit<TicketContext, "replies">): Pr
 
 // The model's answer to a new ticket: resolved with a reply for the customer, or not resolved and
 // left for an agent.
+// language comes first so the model names the ticket's language before it writes anything: with the
+// rule in the prompt alone, about 1 in 9 English tickets answered from a Polish document got a
+// Polish reply. Nothing reads it.
 const autoResolveSchema = z.object({
+  language: z.string(),
   resolved: z.boolean(),
   reply: z.string(),
 });
 
-export type AutoResolution = z.infer<typeof autoResolveSchema>;
+export type AutoResolution = Omit<z.infer<typeof autoResolveSchema>, "language">;
 
 // Tries to answer a new ticket from the knowledge base (the excerpts closest to it). Nothing is stored here.
 export async function autoResolveTicket(

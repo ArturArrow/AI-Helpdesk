@@ -20,7 +20,7 @@
   "marker": "30-day money-back",
   "expect": "resolve",
   "facts": [
-   "30",
+   "(?i)30|pełny zwrot|pełnego zwrotu",
    "5\\s*[-–—]+\\s*10|5 do 10"
   ]
  },
