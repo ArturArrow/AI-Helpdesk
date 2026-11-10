@@ -4,7 +4,7 @@
 
 - **Date:** 2026-11-10
 - **Discovered (`--list`):** 471 tests in 10 files.
-- **Result:** 471 passed, 0 failed (1.5m), after adding the client's `/rag` page and its navbar link.
+- **Result:** 471 passed, 0 failed (1.4m), after switching auto-resolve to the rag service (the webhook now needs both OpenAI and the rag service to auto-resolve).
 
 ## tests/login.spec.ts
 
