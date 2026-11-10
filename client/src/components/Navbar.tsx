@@ -31,12 +31,20 @@ function Navbar({ userName, isAdmin }: NavbarProps) {
             Tickets
           </Link>
           {isAdmin && (
-            <Link
-              to="/users"
-              className="text-sm font-medium text-gray-700 hover:text-gray-900"
-            >
-              Users
-            </Link>
+            <>
+              <Link
+                to="/users"
+                className="text-sm font-medium text-gray-700 hover:text-gray-900"
+              >
+                Users
+              </Link>
+              <Link
+                to="/rag"
+                className="text-sm font-medium text-gray-700 hover:text-gray-900"
+              >
+                Knowledge base
+              </Link>
+            </>
           )}
         </div>
         <div className="flex items-center gap-4">
