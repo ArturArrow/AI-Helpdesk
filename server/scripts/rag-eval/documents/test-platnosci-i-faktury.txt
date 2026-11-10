@@ -1,0 +1,25 @@
+Przyszly Programista -- Płatności, faktury i zniżki
+
+Metody płatności
+
+Za kursy można zapłacić kartą (Visa, Mastercard), BLIK-iem, szybkim przelewem przez Przelewy24 albo PayPalem. Nie przyjmujemy płatności gotówką ani kryptowalutami. Płatność kartą i BLIK-iem jest księgowana od razu, a zwykły przelew bankowy do 2 dni roboczych; dostęp do kursu pojawia się dopiero po zaksięgowaniu.
+
+Płatność w ratach
+
+Kursy i pakiety w cenie od 500 zł można rozłożyć na 3 raty 0% przez PayPo. Raty wybiera się na stronie płatności. Wniosek rozpatruje PayPo, nie my, więc w sprawie odrzuconego wniosku trzeba kontaktować się z PayPo.
+
+Faktury VAT
+
+Wystawiamy faktury VAT dla firm i osób prywatnych. Żeby dostać fakturę na firmę, zaznacz "Chcę fakturę" przy zakupie i podaj NIP oraz nazwę firmy. Faktura przychodzi mailem w ciągu 24 godzin od zaksięgowania płatności.
+
+Jeśli zapomniałeś zaznaczyć fakturę, możesz o nią poprosić w ciągu 7 dni od zakupu, pisząc do supportu z numerem zamówienia i danymi firmy. Po 7 dniach nie możemy już wystawić faktury na firmę do paragonu.
+
+Korekta faktury (np. błędny NIP lub adres) jest możliwa w ciągu 30 dni od wystawienia.
+
+Zniżki
+
+Studenci i uczniowie dostają 20% zniżki na wszystkie kursy po przesłaniu ważnej legitymacji do supportu; dostają wtedy jednorazowy kod rabatowy ważny 14 dni. Zniżki studenckiej nie łączy się z innymi kodami ani z promocjami Black Friday.
+
+Przy zakupie trzech lub więcej kursów naraz w jednym zamówieniu cena całego koszyka spada automatycznie o 15%.
+
+Firmy kupujące dostęp dla co najmniej 5 pracowników dostają ofertę indywidualną: wystarczy napisać na firmy@przyszlyprogramista.ai.

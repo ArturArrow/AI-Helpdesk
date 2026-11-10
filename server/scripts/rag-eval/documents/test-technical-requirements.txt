@@ -1,0 +1,25 @@
+Przyszly Programista -- Technical Requirements
+
+Supported browsers
+
+The course platform supports the two latest versions of Chrome, Edge, Firefox and Safari. Internet Explorer and Opera Mini are not supported. JavaScript and cookies must be enabled.
+
+Internet connection
+
+Videos stream in up to 1080p. 1080p needs a stable connection of at least 5 Mbps; 720p needs 3 Mbps. Below 1.5 Mbps the player falls back to 360p. The quality can also be chosen by hand in the player's settings (gear icon).
+
+Mobile app
+
+The Przyszly Programista mobile app runs on iOS 16 or later and Android 10 or later. You sign in with the same email and password as on the website, and your progress syncs between devices. The app streams videos only; like the website, it can't download them for offline viewing.
+
+Course source code
+
+Each course's source code is in a private GitHub repository. To get access, add your GitHub username in Profile > Integrations; an invitation arrives within 1 hour. If you change your GitHub username, update it there, since the old invitation stops working.
+
+Coding exercises
+
+Exercises run in the browser in our online editor, so nothing needs installing for them. For projects done on your own computer, each course lists its requirements in the first lesson (for example Node.js 22 for the JavaScript courses and Python 3.12 for the Python course).
+
+Two-factor authentication
+
+You can turn on two-factor authentication in Profile > Security with an authenticator app (Google Authenticator, Authy or 1Password). If you lose your phone, sign in with one of the 10 backup codes shown when you turned it on.

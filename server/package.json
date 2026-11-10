@@ -16,7 +16,8 @@
     "db:studio": "prisma studio",
     "db:seed": "bun run prisma/seed.ts",
     "db:seed:tickets": "bun run prisma/seed-tickets.ts",
-    "db:seed:replies": "bun run prisma/seed-replies.ts"
+    "db:seed:replies": "bun run prisma/seed-replies.ts",
+    "eval:rag": "bun run scripts/evalRag.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.102",
