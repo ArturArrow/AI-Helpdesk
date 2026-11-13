@@ -132,7 +132,7 @@ describe('DashboardPage', () => {
       `${new Date(2026, 2, 1).toLocaleDateString(undefined, long)}4`,
       `${new Date(2026, 2, 2).toLocaleDateString(undefined, long)}0`,
     ])
-    expect(screen.getAllByTestId('bar')).toHaveLength(2)
+    expect(screen.getByText('4 tickets · 2.0 per day')).toBeInTheDocument()
   })
 
   it('shows "No tickets yet." in the chart when the response has no days', async () => {

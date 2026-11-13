@@ -2,10 +2,11 @@ import { useQuery } from '@tanstack/react-query'
 import axios from 'axios'
 import type { TicketStats } from 'core/constants/ticket'
 import { statsPeriodLabels, statsPeriods, ticketStatsQuerySchema, type StatsPeriod } from 'core/schemas/tickets'
+import { Bot, Clock, Inbox, type LucideIcon, Sparkles, Ticket } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import TicketsPerDayChart from '@/components/TicketsPerDayChart.tsx'
-import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card.tsx'
+import { Card, CardAction, CardContent, CardDescription, CardHeader } from '@/components/ui/card.tsx'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select.tsx'
 import { Skeleton } from '@/components/ui/skeleton.tsx'
 import { errorMessage } from '@/lib/errorMessage.ts'
@@ -29,19 +30,63 @@ function formatPercent(part: number, whole: number): string {
   return whole === 0 ? '—' : `${Math.round((part / whole) * 100)}%`
 }
 
-function StatCard({ label, to, children }: { label: string; to?: string; children: ReactNode }) {
+// A card with a link is clickable as a whole: the link's ::after covers the card, while its
+// accessible name stays the label.
+function StatCard({
+  label,
+  icon: Icon,
+  to,
+  footer,
+  children,
+}: {
+  label: string
+  icon: LucideIcon
+  to?: string
+  footer?: ReactNode
+  children: ReactNode
+}) {
   return (
-    <Card>
+    <Card className={to ? 'relative transition-colors hover:bg-muted/50' : undefined}>
       <CardHeader>
-        <CardDescription>{to ? <Link to={to} className="hover:underline">{label}</Link> : label}</CardDescription>
+        <CardDescription>
+          {to ? (
+            <Link to={to} className="after:absolute after:inset-0 after:rounded-xl focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring">
+              {label}
+            </Link>
+          ) : (
+            label
+          )}
+        </CardDescription>
+        <CardAction>
+          <Icon aria-hidden="true" className="size-4 text-muted-foreground" />
+        </CardAction>
       </CardHeader>
-      <CardContent className="text-3xl font-semibold tabular-nums">{children}</CardContent>
+      <CardContent className="space-y-2">
+        <div className="text-3xl font-semibold tabular-nums">{children}</div>
+        {footer}
+      </CardContent>
     </Card>
   )
 }
 
+// The value is in the card's text already, so the bar is decoration.
+function ShareBar({ part, whole }: { part: number; whole: number }) {
+  const percent = whole === 0 ? 0 : Math.min(100, (part / whole) * 100)
+  return (
+    <div aria-hidden="true" className="h-1.5 overflow-hidden rounded-full bg-muted">
+      <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${percent}%` }} />
+    </div>
+  )
+}
+
 // Open is the backlog now, whatever the period.
-const statLabels = ['Total tickets', 'Open tickets (now)', 'Resolved by AI', 'Resolved by AI (%)', 'Avg. resolution time']
+const statCards: { label: string; icon: LucideIcon }[] = [
+  { label: 'Total tickets', icon: Ticket },
+  { label: 'Open tickets (now)', icon: Inbox },
+  { label: 'Resolved by AI', icon: Bot },
+  { label: 'Resolved by AI (%)', icon: Sparkles },
+  { label: 'Avg. resolution time', icon: Clock },
+]
 
 const periodItems = statsPeriods.map((period) => ({ value: period, label: statsPeriodLabels[period] }))
 const periodSchema = ticketStatsQuerySchema.shape.period
@@ -101,18 +146,32 @@ function DashboardPage() {
         <>
           <div aria-busy={!stats} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
             {!stats ? (
-              statLabels.map((label) => (
-                <StatCard key={label} label={label}>
+              statCards.map(({ label, icon }) => (
+                <StatCard key={label} label={label} icon={icon}>
                   <Skeleton className="h-9 w-16" />
                 </StatCard>
               ))
             ) : (
               <>
-                <StatCard label="Total tickets" to="/tickets">{stats.total}</StatCard>
-                <StatCard label="Open tickets (now)" to="/tickets?status=open">{stats.open}</StatCard>
-                <StatCard label="Resolved by AI">{stats.resolvedByAi}</StatCard>
-                <StatCard label="Resolved by AI (%)">{formatPercent(stats.resolvedByAi, stats.total)}</StatCard>
-                <StatCard label="Avg. resolution time">{formatDuration(stats.averageResolutionMs)}</StatCard>
+                <StatCard label="Total tickets" icon={Ticket} to="/tickets">
+                  {stats.total}
+                </StatCard>
+                <StatCard label="Open tickets (now)" icon={Inbox} to="/tickets?status=open">
+                  {stats.open}
+                </StatCard>
+                <StatCard label="Resolved by AI" icon={Bot}>
+                  {stats.resolvedByAi}
+                </StatCard>
+                <StatCard
+                  label="Resolved by AI (%)"
+                  icon={Sparkles}
+                  footer={<ShareBar part={stats.resolvedByAi} whole={stats.total} />}
+                >
+                  {formatPercent(stats.resolvedByAi, stats.total)}
+                </StatCard>
+                <StatCard label="Avg. resolution time" icon={Clock}>
+                  {formatDuration(stats.averageResolutionMs)}
+                </StatCard>
               </>
             )}
           </div>
