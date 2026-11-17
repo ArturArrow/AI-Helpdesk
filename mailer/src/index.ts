@@ -1,3 +1,5 @@
+import "./instrument";
+import * as Sentry from "@sentry/bun";
 import express, { type ErrorRequestHandler } from "express";
 import { PORT } from "./env";
 import { startPolling } from "./inbound";
@@ -15,7 +17,10 @@ app.use(sendRouter);
 const errorHandler: ErrorRequestHandler = (err, _req, res, next) => {
   if (res.headersSent) return next(err);
   const status = Number.isInteger(err?.status) && err.status >= 400 && err.status < 600 ? err.status : 500;
-  if (status >= 500) console.error(err);
+  if (status >= 500) {
+    console.error(err);
+    Sentry.captureException(err);
+  }
   res.status(status).json({ error: err?.expose ? err.message : "Internal Server Error" });
 };
 app.use(errorHandler);
@@ -27,7 +32,10 @@ const server = app.listen(PORT, () => {
 // A wrong SMTP setting shows up at startup rather than on the first reply.
 transporter.verify().then(
   () => console.log("[outbound] SMTP connection OK"),
-  (error) => console.error("[outbound] SMTP connection failed:", error),
+  (error) => {
+    console.error("[outbound] SMTP connection failed:", error);
+    Sentry.captureException(error);
+  },
 );
 
 const stopPolling = startPolling();
@@ -35,6 +43,7 @@ const stopPolling = startPolling();
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     stopPolling();
-    server.close(() => process.exit(0));
+    // Sends any events still queued.
+    server.close(() => void Sentry.close(2000).then(() => process.exit(0)));
   });
 }

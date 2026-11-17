@@ -15,8 +15,10 @@ export class RagServiceError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    // The underlying failure, shown in Sentry under the 502 the error handler reports.
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
   }
 }
 
@@ -30,7 +32,7 @@ async function call(path: string, init: RequestInit & { timeoutMs?: number } = {
     });
   } catch (error) {
     console.error("rag service unreachable:", error);
-    throw new RagServiceError(502, "The document service is unavailable");
+    throw new RagServiceError(502, "The document service is unavailable", { cause: error });
   }
   if (res.ok) return res;
 
@@ -44,7 +46,9 @@ async function call(path: string, init: RequestInit & { timeoutMs?: number } = {
   }
   // A wrong RAG_SECRET (401) or a failure in the service: nothing the caller can fix.
   console.error(`rag service answered ${res.status}:`, detail);
-  throw new RagServiceError(502, "The document service failed");
+  throw new RagServiceError(502, "The document service failed", {
+    cause: new Error(`rag service answered ${res.status}: ${String(detail)}`),
+  });
 }
 
 export async function listRagDocuments(): Promise<RagDocument[]> {

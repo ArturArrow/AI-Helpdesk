@@ -2,9 +2,9 @@
 
 ## Last run
 
-- **Date:** 2026-11-10
+- **Date:** 2026-11-17
 - **Discovered (`--list`):** 474 tests in 10 files.
-- **Result:** 474 passed, 0 failed (1.9m), after adding the `GET /api/rag/documents/:id/file` guard tests.
+- **Result:** 474 passed, 0 failed (2.1m), after adding Sentry error reporting (no test changes; Sentry stays off in E2E).
 
 ## tests/login.spec.ts
 

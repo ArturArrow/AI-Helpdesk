@@ -25,3 +25,9 @@ export const isMailerConfigured = Boolean(MAILER_URL && MAILER_SECRET);
 export const RAG_URL = process.env.RAG_URL;
 export const RAG_SECRET = process.env.RAG_SECRET;
 export const isRagConfigured = Boolean(RAG_URL && RAG_SECRET);
+// Sentry project DSN for error reporting (src/instrument.ts). Optional: without it nothing is sent.
+export const SENTRY_DSN = process.env.SENTRY_DSN;
+// Where it runs (production, staging, development), set apart from NODE_ENV, which says how it
+// runs: a staging deploy also runs with NODE_ENV=production. Falls back to NODE_ENV, then
+// development, since the SDK's own default is production.
+export const SENTRY_ENVIRONMENT = process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV || "development";
