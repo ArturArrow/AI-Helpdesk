@@ -10,6 +10,8 @@ TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "")
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL or "unset"
 os.environ["OPENAI_API_KEY"] = "test-key"
 os.environ["RAG_SECRET"] = "test-secret"
+# .env holds the real DSN; an empty one disables Sentry, so a failing test reports nothing.
+os.environ["SENTRY_DSN"] = ""
 
 
 @pytest.fixture(scope="session")

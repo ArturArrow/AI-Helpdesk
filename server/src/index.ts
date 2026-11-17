@@ -1,3 +1,5 @@
+import "./instrument";
+import * as Sentry from "@sentry/bun";
 import cors from "cors";
 import express, { type ErrorRequestHandler } from "express";
 import { toNodeHandler } from "better-auth/node";
@@ -63,6 +65,7 @@ app.get("/api/health/db", async (_req, res) => {
     res.json({ status: "ok" });
   } catch (error) {
     console.error("Database health check failed:", error);
+    Sentry.captureException(error);
     res.status(503).json({ status: "error" });
   }
 });
@@ -73,7 +76,10 @@ app.get("/api/health/db", async (_req, res) => {
 const errorHandler: ErrorRequestHandler = (err, _req, res, next) => {
   if (res.headersSent) return next(err);
   const status = Number.isInteger(err?.status) && err.status >= 400 && err.status < 600 ? err.status : 500;
-  if (status >= 500) console.error(err);
+  if (status >= 500) {
+    console.error(err);
+    Sentry.captureException(err);
+  }
   res.status(status).json({ error: err?.expose ? err.message : "Internal Server Error" });
 };
 app.use(errorHandler);
@@ -86,6 +92,7 @@ app.listen(port, async () => {
     console.log("Connected to the helpdesk database");
   } catch (error) {
     console.error("Failed to connect to the database:", error);
+    Sentry.captureException(error);
   }
 
   // The jobs are the AI's (classification, auto-resolving) and the reply emails, so with
@@ -96,6 +103,7 @@ app.listen(port, async () => {
     console.log("Background job queue started");
   } catch (error) {
     console.error("Failed to start the background job queue:", error);
+    Sentry.captureException(error);
     return;
   }
 
@@ -103,6 +111,8 @@ app.listen(port, async () => {
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.once(signal, async () => {
       await boss.stop();
+      // Sends any events still queued.
+      await Sentry.close(2000);
       process.exit(0);
     });
   }

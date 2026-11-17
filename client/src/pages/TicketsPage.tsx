@@ -23,6 +23,8 @@ function TicketsPage() {
   const parsedSort = sortSchema.safeParse(Object.fromEntries(searchParams))
   const sort: TicketSort = parsedSort.success ? parsedSort.data : defaultSort
 
+
+
   function handleFiltersChange(next: TicketFilterValues) {
     // Searching replaces the history entry, so Back doesn't step through every pause in typing.
     const onlySearchChanged = next.status === filters.status && next.category === filters.category

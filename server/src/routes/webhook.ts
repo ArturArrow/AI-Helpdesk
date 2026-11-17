@@ -1,3 +1,4 @@
+import * as Sentry from "@sentry/bun";
 import { Router } from "express";
 import { inboundEmailSchema } from "core/schemas/tickets";
 import { Prisma } from "../../generated/prisma/client";
@@ -108,6 +109,7 @@ webhookRouter.post("/inbound-email", async (req, res) => {
         await boss.send(CLASSIFY_TICKET_QUEUE, job);
       } catch (error) {
         console.error(`[queue] couldn't queue classification of ticket ${ticket.id}:`, error);
+        Sentry.captureException(error);
       }
     }
     if (isAutoResolveConfigured) {
@@ -115,6 +117,7 @@ webhookRouter.post("/inbound-email", async (req, res) => {
         await boss.send(AUTO_RESOLVE_TICKET_QUEUE, job);
       } catch (error) {
         console.error(`[queue] couldn't queue auto-resolving ticket ${ticket.id}:`, error);
+        Sentry.captureException(error);
         await openForAgent(ticket.id);
       }
     }

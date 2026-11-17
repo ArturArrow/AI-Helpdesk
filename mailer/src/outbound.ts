@@ -1,3 +1,4 @@
+import * as Sentry from "@sentry/bun";
 import { timingSafeEqual } from "node:crypto";
 import { sendEmailSchema } from "core/schemas/email";
 import express, { Router, type NextFunction, type Request, type Response } from "express";
@@ -46,6 +47,7 @@ sendRouter.post("/send", requireMailerSecret, express.json({ limit: "26mb" }), a
     res.json({ messageId: info.messageId });
   } catch (error) {
     console.error("[outbound] SMTP send failed:", error);
+    Sentry.captureException(error);
     res.status(502).json({ error: "Couldn't send the email" });
   }
 });

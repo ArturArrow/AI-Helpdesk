@@ -32,7 +32,9 @@ export default defineConfig({
       command: 'bun run dev --port 5174 --strictPort',
       cwd: 'client',
       url: 'http://localhost:5174',
-      env: { API_URL: 'http://localhost:3101' },
+      // An empty VITE_SENTRY_DSN overrides client/.env (Vite prefers process.env), so test runs
+      // don't report errors to Sentry.
+      env: { API_URL: 'http://localhost:3101', VITE_SENTRY_DSN: '' },
       reuseExistingServer: false,
     },
   ],

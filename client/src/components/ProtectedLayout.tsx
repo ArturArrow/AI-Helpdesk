@@ -1,11 +1,14 @@
+import * as Sentry from '@sentry/react'
 import { Role } from 'core/constants/role'
-import { Navigate, Outlet } from 'react-router'
+import { Navigate, Outlet, useLocation } from 'react-router'
 import { Skeleton } from '@/components/ui/skeleton.tsx'
 import { authClient } from '../lib/auth-client.ts'
+import ErrorFallback from './ErrorFallback.tsx'
 import Navbar from './Navbar.tsx'
 
 function ProtectedLayout() {
   const { data: session, isPending } = authClient.useSession()
+  const { pathname } = useLocation()
 
   if (isPending) {
     // Mirrors the signed-in layout (navbar, then page) so nothing jumps when it resolves.
@@ -33,7 +36,14 @@ function ProtectedLayout() {
     <div className="min-h-svh bg-gray-50">
       <Navbar userName={session.user.name} isAdmin={session.user.role === Role.admin} />
       <main className="mx-auto max-w-6xl px-4 py-8">
-        <Outlet />
+        {/* A page that fails to render shows the fallback under the navbar, so the rest of the app
+            stays usable. Keyed on the path, so navigating away clears the error. */}
+        <Sentry.ErrorBoundary
+          key={pathname}
+          fallback={({ resetError }) => <ErrorFallback onRetry={resetError} />}
+        >
+          <Outlet />
+        </Sentry.ErrorBoundary>
       </main>
     </div>
   )

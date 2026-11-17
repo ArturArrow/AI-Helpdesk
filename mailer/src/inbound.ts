@@ -1,3 +1,4 @@
+import * as Sentry from "@sentry/bun";
 import {
   MAX_ATTACHMENT_BYTES,
   MAX_EMAIL_ATTACHMENT_BYTES,
@@ -76,7 +77,13 @@ export async function forward(email: InboundEmailInput): Promise<ForwardResult> 
   if (res.ok) return "processed";
   const detail = await res.text().catch(() => "");
   console.error(`[inbound] webhook answered ${res.status} for ${email.messageId ?? "(no Message-ID)"}: ${detail}`);
-  return res.status === 400 || res.status === 413 ? "failed" : "retry";
+  if (res.status !== 400 && res.status !== 413) return "retry";
+  // Moved to the failed folder and never retried, so someone has to look at it.
+  Sentry.captureMessage(`Inbound email rejected by the webhook (${res.status})`, {
+    level: "warning",
+    extra: { messageId: email.messageId, detail },
+  });
+  return "failed";
 }
 
 // One pass over the mailbox: every email in it is forwarded and moved out, so whatever is left
@@ -128,6 +135,7 @@ export function startPolling() {
       await pollOnce();
     } catch (error) {
       console.error("[inbound] poll failed:", error);
+      Sentry.captureException(error);
     }
     if (!stopped) timer = setTimeout(run, POLL_INTERVAL_MS);
   };
