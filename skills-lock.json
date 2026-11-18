@@ -13,6 +13,13 @@
       "sourceType": "github",
       "skillPath": "skills/frontend-design/SKILL.md",
       "computedHash": "83485963700bcf11d5bf78118facb301676b69d918fee2e45a95e7f1a2840f6c"
+    },
+    "use-railway": {
+      "source": "railwayapp/railway-skills",
+      "commit": "526e95524e964ed326689cbac4464d97a58ab81c",
+      "sourceType": "github",
+      "skillPath": "plugins/railway/skills/use-railway/SKILL.md",
+      "computedHash": "032a2a567180cce2943c508b9cc8f209c7a59074e49badd3eee5463384ced2b1"
     }
   }
 }
