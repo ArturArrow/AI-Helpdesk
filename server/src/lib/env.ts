@@ -13,6 +13,13 @@ export const BETTER_AUTH_URL = required("BETTER_AUTH_URL");
 export const CLIENT_URL = required("CLIENT_URL");
 // Shared secret the mail pipeline sends in X-Inbound-Secret (see middleware/requireWebhookSecret.ts).
 export const INBOUND_EMAIL_SECRET = required("INBOUND_EMAIL_SECRET");
+// How many reverse proxies sit in front of the server (1 on Railway, its edge proxy). Optional:
+// without it req.ip is the socket address, which behind a proxy is the proxy's, so every client
+// would share one sign-in rate-limit bucket. Never set it without a proxy: clients could then
+// forge X-Forwarded-For.
+const trustProxy = process.env.TRUST_PROXY;
+if (trustProxy && !/^\d+$/.test(trustProxy)) throw new Error("TRUST_PROXY must be a number of proxy hops.");
+export const TRUST_PROXY_HOPS = trustProxy ? Number(trustProxy) : undefined;
 // OpenAI key for the AI features (lib/ai.ts). Optional: without it they answer 503.
 export const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 // The mailer (mailer/) that emails agent and AI replies. Optional: without both, replies are
