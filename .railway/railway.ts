@@ -2,7 +2,10 @@
 // `railway config apply`. Secrets are never written here: `preserve()` keeps whatever value
 // is set in Railway (`railway variable set KEY=... --service <name>`), and the other services
 // reference the one service that holds each secret.
-import { defineRailway, postgres, preserve, project, service } from "railway/iac";
+import { defineRailway, github, postgres, preserve, project, service } from "railway/iac";
+
+// Every service builds from this repository; a push to main deploys it.
+const repo = github("ArturArrow/AI-Helpdesk", { branch: "main" });
 
 export default defineRailway(() => {
   // Two databases, both on Railway's Postgres 18 image, which ships pgvector. The rag service
@@ -12,6 +15,7 @@ export default defineRailway(() => {
 
   // Not public: only the server calls it, over the private network.
   const rag = service("rag", {
+    source: repo,
     build: { builder: "DOCKERFILE", dockerfilePath: "rag/Dockerfile" },
     healthcheck: "/health",
     env: {
@@ -26,6 +30,7 @@ export default defineRailway(() => {
 
   // Not public either: it polls IMAP itself and the server calls its /send privately.
   const mailer = service("mailer", {
+    source: repo,
     build: { builder: "DOCKERFILE", dockerfilePath: "mailer/Dockerfile" },
     healthcheck: "/health",
     env: {
@@ -47,6 +52,7 @@ export default defineRailway(() => {
 
   // The public one: the API plus the built client on one origin.
   const server = service("server", {
+    source: repo,
     build: { builder: "DOCKERFILE", dockerfilePath: "server/Dockerfile" },
     // Runs in the new image before it takes traffic; a failed migration stops the deploy.
     preDeploy: "bun run db:deploy",
