@@ -12,6 +12,7 @@ COPY rag/app app
 COPY rag/knowledge-base knowledge-base
 
 ENV PATH="/app/.venv/bin:$PATH"
-# `::` listens on IPv6 and IPv4, so the private network reaches it in older (IPv6-only)
-# Railway environments too.
-CMD ["sh", "-c", "fastapi run app/main.py --host :: --port ${PORT:-3003}"]
+# An empty host binds both IPv4 and IPv6: Railway's healthcheck comes over IPv4, and older
+# Railway environments reach services privately over IPv6 only. `::` alone is IPv6-only here,
+# since asyncio sets IPV6_V6ONLY on it, and the healthcheck never got through.
+CMD ["sh", "-c", "fastapi run app/main.py --host '' --port ${PORT:-3003}"]
