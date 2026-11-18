@@ -1,12 +1,13 @@
 import "./instrument";
 import * as Sentry from "@sentry/bun";
 import cors from "cors";
+import path from "node:path";
 import express, { type ErrorRequestHandler } from "express";
 import { toNodeHandler } from "better-auth/node";
 import { isAiConfigured } from "./lib/ai";
 import { auth, CLIENT_IP_HEADER } from "./lib/auth";
 import { prisma } from "./lib/db";
-import { CLIENT_URL, isMailerConfigured } from "./lib/env";
+import { CLIENT_URL, isMailerConfigured, TRUST_PROXY_HOPS } from "./lib/env";
 import { boss, startQueue } from "./lib/queue";
 import { requireAdmin } from "./middleware/requireAdmin";
 import { requireAuth } from "./middleware/requireAuth";
@@ -18,6 +19,8 @@ import { webhookRouter } from "./routes/webhook";
 
 const app = express();
 const port = process.env.PORT ?? 3001;
+
+if (TRUST_PROXY_HOPS !== undefined) app.set("trust proxy", TRUST_PROXY_HOPS);
 
 app.use(cors({ origin: CLIENT_URL, credentials: true }));
 
@@ -69,6 +72,17 @@ app.get("/api/health/db", async (_req, res) => {
     res.status(503).json({ status: "error" });
   }
 });
+
+// In production the server also serves the built client (client/dist), so the app and the API
+// share one origin and the auth cookie needs no cross-site setup. In dev Vite serves the client.
+// Any path outside /api gets index.html, so client routes like /tickets/12 load on refresh.
+if (process.env.NODE_ENV === "production") {
+  const clientDist = path.resolve(import.meta.dir, "../../client/dist");
+  app.use(express.static(clientDist, { index: false }));
+  app.get(/^\/(?!api(\/|$))/, (_req, res) => {
+    res.sendFile(path.join(clientDist, "index.html"));
+  });
+}
 
 // Must stay last. Without it Express's finalhandler renders err.stack whenever
 // NODE_ENV isn't "production" — e.g. a malformed JSON body or a DB error in requireAuth.
